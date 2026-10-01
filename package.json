@@ -1,0 +1,38 @@
+{
+  "name": "kindmetrics-cli-collector-api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local REST API for the KindMetrics Collector installation",
+  "scripts": {
+    "start": "nest start",
+    "start:dev": "nest start --watch",
+    "build": "nest build",
+    "lint": "eslint \"src/**/*.ts\" eslint.config.mjs --max-warnings=0",
+    "format": "prettier --write \"src/**/*.ts\" \"*.json\" \"*.mjs\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"*.json\" \"*.mjs\"",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/config": "^4.0.0",
+    "@nestjs/core": "^11.0.0",
+    "@nestjs/platform-express": "^11.0.0",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.1",
+    "mysql2": "^3.14.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "@nestjs/cli": "^11.0.0",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "eslint": "^9.0.0",
+    "eslint-config-prettier": "^10.0.0",
+    "globals": "^16.0.0",
+    "prettier": "^3.5.0",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.0.0"
+  }
+}
