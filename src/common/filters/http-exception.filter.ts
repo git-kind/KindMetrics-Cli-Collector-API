@@ -5,9 +5,8 @@ import {
   HttpException,
   HttpStatus,
 } from '@nestjs/common';
-import { Request, Response } from 'express';
+import { FastifyReply, FastifyRequest } from 'fastify';
 import { AppLogger } from '../logging/app-logger.service';
-import { HttpErrorResponseDto } from '../errors/http-error-response.dto';
 
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
@@ -15,26 +14,52 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
   catch(exception: unknown, host: ArgumentsHost): void {
     const context = host.switchToHttp();
-    const response = context.getResponse<Response>();
-    const request = context.getRequest<Request>();
+    const response = context.getResponse<FastifyReply>();
+    const request = context.getRequest<FastifyRequest>();
     const statusCode =
       exception instanceof HttpException
         ? exception.getStatus()
         : HttpStatus.INTERNAL_SERVER_ERROR;
-    const message = this.getSafeMessage(exception, statusCode);
+    const details = this.getSafeMessage(exception, statusCode);
+    const message =
+      statusCode === HttpStatus.UNPROCESSABLE_ENTITY
+        ? 'Existen errores de validación.'
+        : statusCode === HttpStatus.NOT_IMPLEMENTED
+          ? 'La operación aún no está implementada.'
+          : statusCode >= HttpStatus.INTERNAL_SERVER_ERROR
+            ? 'Error interno del servidor.'
+            : typeof details === 'string'
+              ? details
+              : 'La solicitud no pudo ser procesada.';
 
     if (statusCode >= HttpStatus.INTERNAL_SERVER_ERROR) {
-      this.logger.error(`${request.method} ${request.path} ${statusCode}`);
+      this.logger.error(`${request.method} ${request.url} ${statusCode}`);
     }
 
-    const body: HttpErrorResponseDto = {
-      statusCode,
-      timestamp: new Date().toISOString(),
-      path: request.path,
+    response.status(statusCode).send({
+      success: false,
       message,
-    };
+      data: null,
+      errors: (Array.isArray(details) ? details : [message]).map((detail) => ({
+        code: this.getErrorCode(exception, statusCode),
+        message: detail,
+      })),
+      meta: { requestId: request.id },
+    });
+  }
 
-    response.status(statusCode).json(body);
+  private getErrorCode(exception: unknown, statusCode: number): string {
+    if (
+      statusCode === HttpStatus.BAD_REQUEST ||
+      statusCode === HttpStatus.UNPROCESSABLE_ENTITY
+    ) return 'VALIDATION_ERROR';
+    if (statusCode === HttpStatus.NOT_FOUND) return 'NOT_FOUND';
+    if (statusCode === HttpStatus.UNAUTHORIZED) return 'UNAUTHORIZED';
+    if (statusCode === HttpStatus.FORBIDDEN) return 'FORBIDDEN';
+    if (statusCode === HttpStatus.NOT_IMPLEMENTED) return 'NOT_IMPLEMENTED';
+    if (statusCode >= HttpStatus.INTERNAL_SERVER_ERROR) return 'INTERNAL_ERROR';
+    if (exception instanceof HttpException) return `HTTP_${statusCode}`;
+    return 'REQUEST_ERROR';
   }
 
   private getSafeMessage(

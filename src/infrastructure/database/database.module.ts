@@ -1,16 +1,15 @@
 import { Global, Module } from '@nestjs/common';
-import { DATABASE_CONNECTION } from './database-connection';
 import { MysqlDatabaseConnection } from './mysql-database.connection';
+import { MySqlQueryExecutor } from './mysql-query.executor';
+import { MySqlStoredProcedureExecutor } from './mysql-stored-procedure.executor';
 
 @Global()
 @Module({
   providers: [
     MysqlDatabaseConnection,
-    {
-      provide: DATABASE_CONNECTION,
-      useExisting: MysqlDatabaseConnection,
-    },
+    MySqlQueryExecutor,
+    MySqlStoredProcedureExecutor,
   ],
-  exports: [DATABASE_CONNECTION],
+  exports: [MySqlQueryExecutor, MySqlStoredProcedureExecutor],
 })
 export class DatabaseModule {}

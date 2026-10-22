@@ -1,694 +1,429 @@
 # KindMetrics-Cli-Collector-API
 
-KindMetrics-Cli-Collector-API is the REST API foundation for the KindMetrics ecosystem.
+> **Proyecto:** KindMetrics
+> **Componente:** API local del Collector (también denominada informalmente `KindMetricsCte-API`)
+> **Estado auditado:** 22-10-2026. NestJS con Fastify; implementados `GET /health` y `POST /api/v1/queries/execute` (este último responde 501 intencionalmente). No hay todavía autenticación, CompanyContext ni CRUD funcional.
+> **Fuente:** decisiones globales en `docs/`; el estado de implementación se contrasta con el código de este repositorio.
 
-This repository is intentionally limited to the base architecture of the collector API. It does not implement the functional business modules yet, but it does prepare the technical structure required for future modules such as Installation, Company, Database, Equipment, Discovery, Extraction Methods, Collectors, Mapping, Execution, Logs, Storage and Synchronization.
+## 1. Objetivo
 
-The project follows the architectural decisions defined by the global KindMetrics documentation and keeps the responsibility boundaries explicit from the beginning.
+`KindMetrics-Cli-Collector-API` es la API REST local de administración y configuración del Collector de KindMetrics. Prepara la infraestructura necesaria para instalación, Company, base de datos, equipos, descubrimiento, métodos de extracción, Collectors, mapeos, ejecución, logs, almacenamiento y sincronización.
 
-## Objective of this stage
+Su responsabilidad principal es exponer operaciones de configuración, consulta y administración del Collector; **no** ejecutar el scheduler de adquisición, que corresponde a `KindMetrics-Cli-Collector-BS`.
 
-The purpose of this first phase is to establish the base platform that will later support the full KindMetrics collector ecosystem without changing the architecture as modules are added.
+El proyecto debe mantener convenciones arquitectónicas compatibles con `KindMetricsAPI` sin confundir las responsabilidades del entorno central KIND con las del entorno local CUSTOMER.
 
-This stage includes:
+## 2. Alcance y estado
 
-- NestJS project initialization
-- TypeScript configuration
-- ESLint and Prettier setup
-- Environment-based configuration
-- Global validation
-- Centralized error handling
-- Logging foundation
-- Health endpoint
-- MySQL infrastructure preparation
-- Repository abstractions
-- Security and CompanyContext base infrastructure
-- JWT infrastructure groundwork
-- Base modules and folders for future features
+La implementación actual contiene NestJS, TypeScript, Fastify, Swagger, validación HTTP, manejo centralizado de errores, logging, health check y un pool MySQL. `GET /health` consulta `SELECT 1` mediante Controller → Service → contrato de Repository → implementación MySQL → Query Executor. `POST /api/v1/queries/execute` valida su DTO con Zod y responde 501 sin ejecutar SQL.
 
-This stage does not include full CRUD or complete domain implementations for the future modules.
+No están implementados Auth/JWT, Guards, CompanyContext, CRUD administrativo, sincronización ni conexión con Collector-BS. Los módulos funcionales se incorporarán gradualmente; la arquitectura objetivo descrita en este README no afirma que esas funcionalidades ya existan.
 
-## Architectural principles
+## 3. Principios obligatorios
 
-The architecture must be:
+- Arquitectura modular, orientada a dominio y **por capas**.
+- Convención principal de capas: **Controllers → Services → Repository Contracts → Repository Implementations → MySQL Executors → MySQL**.
+- **Models** y DTOs son contratos de datos usados transversalmente; no una etapa de ejecución.
+- Dependencias hacia abstracciones; las implementaciones se inyectan mediante NestJS.
+- Separación explícita de Application e Infrastructure.
+- Separación de repositorios administrativos (`StoredProcedures`) y de consulta (`Queries`).
+- SQL exclusivamente en infraestructura de persistencia; nunca en Controllers o Services.
+- Consultas parametrizadas; prohibido concatenar entradas no confiables en SQL.
+- No introducir ORM como mecanismo principal sin una decisión arquitectónica aprobada.
+- No modificar contratos HTTP existentes ni eliminar código aprobado durante refactorizaciones sin analizar su impacto.
 
-- Modular
-- Domain-oriented
-- Layered
-- Repository-oriented
-- Explicitly separated between Application and Infrastructure
-- Separated between Administration Repository and Query Repository
+### 3.1 Flujo de dependencias
 
-The conceptual dependency flow is:
-
+```text
 HTTP / REST
-    ↓
-Security / Company Context
-    ↓
+    |
+Autenticación / autorización / validación
+    |
 Controllers
-    ↓
-DTOs / Validation
-    ↓
-Services
-    ↓
-Entities / Domain Models
-    ↓
-Repository Interfaces
-    ↓
+    |
+Services  <---- Models / DTOs / Domain Models
+    |
+Repository Contracts (interfaces / tokens)
+    |
 Repository Implementations
-    ↓
-MySQL Executors
-    ↓
-MySQL
-
-## Responsibility layers
-
-### 1. HTTP / REST
-
-Responsibility:
-
-- Receive HTTP requests
-- Execute controllers
-- Receive DTOs
-- Return HTTP responses
-- Delegate business tasks to the application layer
-
-The HTTP layer must not contain:
-
-- business logic
-- SQL
-- direct MySQL access
-- database connection code
-
-### 2. DTO / Validation
-
-Responsibility:
-
-- define request and response contracts
-- validate input data
-- validate required fields
-- validate types
-- validate UUIDs
-- validate enums
-- validate ranges and formats
-
-DTOs are contract objects, not business logic containers.
-
-### 3. Security
-
-A transversal security layer must be prepared for:
-
-- JWT authentication
-- authorization
-- permission validation
-- user identity
-- Company access validation
-
-JWT represents the authenticated identity.
-
-The access to Company and permissions must be validated in the API, not based only on the JWT token. The API is the final authority.
-
-### 4. Company Context
-
-A CompanyContext mechanism is required.
-
-The client sends:
-
-- Authorization: Bearer <JWT>
-- X-Company-Id: <CompanyId>
-
-The header X-Company-Id identifies the Company the client wants to use. This value must never be trusted blindly.
-
-The API must:
-
-1. validate the JWT
-2. obtain the UserId
-3. obtain X-Company-Id
-4. validate that the Company exists
-5. validate that the user has access to the Company
-6. generate a CompanyContext for the request
-
-Conceptually:
-
-- companyId
-- userId
-- permissions
-
-The frontend must never be able to determine the physical database directly.
-
-The frontend must never send the physical database name as a decision point for backend execution.
-
-### 5. Application / Services
-
-Services contain business use cases and orchestration logic.
-
-Responsibilities:
-
-- validation of business rules
-- orchestration between domain entities
-- coordination between repositories
-- validation of relationships
-- enforcement of domain rules
-
-Services must not:
-
-- execute SQL directly
-- use mysql2 directly
-- build SQL or stored procedures directly
-- know MySQL connection details
-- read configuration from process.env across the codebase
-
-### 6. Entities / Domain Models
-
-The project includes a domain layer for entities and models.
-
-These are not TypeORM entities and not ORM decorators.
-
-They represent the domain model of KindMetrics, and can later evolve into:
-
-- Company
-- User
-- Capability
-- Permission
-- UserCompanyAccess
-- Equipment
-- ExtractionMethod
-- Collector
-- Mapping
-- Storage
-
-This stage does not predefine all final entities, but it creates the base structure so that future domain objects can be introduced cleanly.
-
-### 7. Repositories
-
-The repository pattern is mandatory.
-
-Modules depend on repository contracts, not on concrete persistence implementations.
-
-The project separates the repositories into:
-
-- Administration Repository
-- Query Repository
-
-This avoids mixing configuration and administrative operations with analytical or read-heavy query logic in the same abstraction.
-
-## Administration Repository
-
-Responsibility:
-
-- create
-- update
-- delete
-- read administrative configuration
-- manage Company
-- manage Equipment
-- manage Extraction Methods
-- manage Collectors
-- manage Mappings
-- other administrative tasks
-
-The Administration Repository is expected to use Stored Procedures when appropriate.
-
-Conceptual flow:
-
-Controller
-    ↓
-Service
-    ↓
-Administration Repository
-    ↓
-MySqlStoredProcedureExecutor
-    ↓
-Stored Procedure
-    ↓
-MySQL
-
-Repository implementations must not contain business rules.
-
-## Query Repository
-
-Responsibility:
-
-- read and query operational data
-- support dashboards and metrics
-- support query-builder and exploratory requests
-- fetch dataset information
-- return structured query output
-
-Conceptual flow:
-
-Controller
-    ↓
-Service
-    ↓
-Query Repository
-    ↓
-MySqlQueryExecutor
-    ↓
-Parameterized SQL
-    ↓
-MySQL
-
-Queries must use parameterized SQL only.
-
-The API must validate:
-
-- Company
-- User
-- Permissions
-- Datasource
-- Query definition
-- Allowed tables
-- Allowed fields
-- Parameters
-- Limits
-- Timeout
-
-No arbitrary SQL from the frontend should be accepted without validation.
-
-## MySQL infrastructure
-
-The MySQL infrastructure is separated from the application layer.
-
-The conceptual structure is:
-
-```text
-src/
-└── infrastructure/
-    └── database/
-        └── mysql/
-            ├── mysql.module.ts
-            ├── mysql.connection.ts
-            ├── mysql-query.executor.ts
-            └── mysql-stored-procedure.executor.ts
+    |
++-------------------------------+
+| MySqlQueryExecutor            |
+| MySqlStoredProcedureExecutor  |
++-------------------------------+
+    |
+MySQL: kindmetricscte
 ```
 
-### MySqlQueryExecutor
+Los Guards, Filters, Interceptors, Logging, Config y CompanyContext son mecanismos transversales. No deben convertirse en capas que mezclen lógica de negocio con transporte o persistencia.
 
-Responsibilities:
+## 4. Capas y responsabilidades
 
-- execute parameterized SQL
-- manage database connections
-- return structured results
-- stay free of business logic
+### 4.1 Controllers
 
-### MySqlStoredProcedureExecutor
+**Ubicación objetivo:** `src/Controllers/`.
 
-Responsibilities:
+- Definen rutas y métodos HTTP.
+- Reciben parámetros y DTOs, y delegan a Services.
+- Gestionan códigos de respuesta y contratos HTTP con mecanismos compartidos.
+- No ejecutan SQL, Stored Procedures ni consultas con `mysql2`.
+- No implementan reglas de negocio ni instancian repositorios concretos.
 
-- invoke stored procedures
-- manage input parameters
-- return procedure results
-- stay free of business logic
+**Implementado:** `src/Controllers/Health/` y `src/Controllers/Queries/`. Los módulos Nest que los componen permanecen en `src/modules/`.
 
-The stored procedure executor and the SQL query executor are separated intentionally. They are not merged into a single generic executor.
+### 4.2 Models
 
-## Transactions
+**Ubicación objetivo:** `src/Models/`.
 
-The infrastructure is prepared for transaction handling in a future stage.
+- DTOs de entrada y salida, modelos de dominio, tipos, interfaces de datos y enumeraciones.
+- Validaciones estructurales de DTOs con las herramientas estándar de NestJS.
+- Las entidades son **modelos de dominio**, no entidades TypeORM.
+- No contienen acceso a bases de datos ni lógica de negocio.
+- Evitar definiciones duplicadas entre `entities/`, `modules/*/dto/` y `Models/`.
 
-Conceptually:
+Los DTOs HTTP existentes están centralizados en `src/Models/`; no hay modelos de dominio funcionales todavía.
 
-BEGIN
-    operation A
-    operation B
-    operation C
-COMMIT
+**Distinción:** los contratos de repositorios pueden ubicarse en `Repositories/Contracts/`; los Models no deben convertirse en un depósito de dependencias de infraestructura.
 
-In case of failure:
+### 4.3 Services
 
-ROLLBACK
+**Ubicación objetivo:** `src/Services/`.
 
-This base layer prepares the pattern without implementing module-specific transaction logic yet.
+- Implementan casos de uso y reglas de negocio.
+- Coordinan entidades y repositorios.
+- Validan relaciones y reglas funcionales.
+- Solicitan transacciones mediante contratos de infraestructura cuando corresponda.
+- No ejecutan SQL ni Stored Procedures, no importan `mysql2` y no leen `process.env` de manera dispersa.
 
-## Configuration
+**Implementado:** `HealthService` depende de `HealthRepository`; `QueriesService` mantiene el resultado 501 previsto. No existen aún Services de autenticación, usuarios, Company o sincronización.
 
-The project supports environment-based configuration with the following patterns:
+### 4.4 Repositories
 
-- .env.example
-- .env-dev
-- .env-qa
-- .env-prod
+**Ubicación objetivo:** `src/Repositories/`.
 
-The configuration is centralized and should not be accessed directly throughout the application.
+- `Contracts/`: interfaces y tokens de inyección para los Services.
+- `StoredProcedures/`: implementaciones de administración y escritura mediante procedimientos almacenados **cuando corresponda**.
+- `Queries/`: implementaciones de consultas parametrizadas y lecturas operacionales.
+- Las implementaciones traducen entre modelos de dominio y resultados de persistencia.
+- No implementan reglas de negocio.
+- No se crea un repositorio genérico único que mezcle administración, escritura, consultas analíticas y acceso directo a conexiones.
 
-The configuration covers:
+**Implementado:** `HealthRepository` y `MySqlHealthRepository` para comprobar la conexión. No hay implementaciones de repositorio Stored Procedures porque todavía no hay casos de uso administrativos; existe el executor de infraestructura separado.
 
-- Environment
-- Port
-- MySQL
-- JWT
-- Logging
-- API
-- Other technical parameters
+### 4.5 Infrastructure
 
-Sensitive environment files are not committed when they contain real secrets.
+**Ubicación objetivo:** `src/Infrastructure/`.
 
-The CompanyId is not stored in the environment as a fixed value. Company context belongs to the request and is resolved at runtime.
+Contiene adaptadores específicos de tecnología: pool MySQL, ejecutores, configuración técnica de seguridad y logging. No debe albergar reglas de dominio.
 
-## Error handling
+## 5. Estructura objetivo del proyecto
 
-A centralized error-handling layer is prepared.
-
-This includes:
-
-- exception filters
-- HTTP errors
-- application errors
-- persistence errors
-- authentication errors
-- authorization errors
-
-The API must not expose:
-
-- SQL
-- internal stack traces
-- passwords
-- secrets
-- connection strings
-- tokens
-- sensitive information
-
-## Logging
-
-A technical logging layer is prepared.
-
-It separates technical logs from future execution logs for collectors.
-
-Technical logs may include:
-
-- requests
-- authentication failures
-- authorization failures
-- database errors
-- application errors
-- startup and shutdown events
-
-They must not include:
-
-- passwords
-- full JWTs
-- secrets
-- database passwords
-- full connection strings
-
-## Infrastructure
-
-The infrastructure layer contains technology-specific implementations.
-
-Example structure:
-
-```text
-src/
-├── infrastructure/
-│   ├── database/
-│   │   └── mysql/
-│   ├── repositories/
-│   │   ├── administration/
-│   │   └── query/
-│   ├── security/
-│   └── logging/
-```
-
-The application and modules should not depend directly on infrastructure implementations when an interface or contract exists.
-
-## Dependency direction
-
-The project follows the rule:
-
-HTTP
-    ↓
-Application
-    ↓
-Repository Contracts
-    ↓
-Infrastructure
-
-This means the following are not allowed:
-
-- Controller -> MySQL
-- Controller -> mysql2
-- Service -> MySQL
-- Service -> mysql2
-- Service -> SQL
-- Controller -> Stored Procedure
-- Controller -> Repository Implementation
-
-## Initial project structure
-
-The initial base structure is:
+La estructura siguiente expresa **responsabilidades y convenciones**, no obliga a crear carpetas o archivos vacíos. Los módulos NestJS continúan registrando Controllers, Providers y dependencias. Adaptar las rutas existentes de forma incremental.
 
 ```text
 src/
 ├── main.ts
 ├── app.module.ts
-│
+├── Controllers/
+│   ├── Health/
+│   ├── Auth/
+│   ├── Installation/
+│   ├── Company/
+│   ├── Users/
+│   ├── Equipment/
+│   ├── Collector/
+│   ├── Synchronization/
+│   └── Query/
+├── Models/
+│   ├── Common/
+│   ├── Auth/
+│   ├── Company/
+│   ├── Users/
+│   ├── Collector/
+│   ├── Synchronization/
+│   └── Query/
+├── Services/
+│   ├── Auth/
+│   ├── Company/
+│   ├── Users/
+│   ├── Collector/
+│   ├── Synchronization/
+│   └── Query/
+├── Repositories/
+│   ├── Contracts/
+│   ├── StoredProcedures/
+│   └── Queries/
+├── Modules/                 # Módulos de DI y composición NestJS
+├── Infrastructure/
+│   ├── Database/
+│   │   └── MySQL/
+│   │       ├── mysql.module.ts
+│   │       ├── mysql.connection.ts
+│   │       ├── mysql-query.executor.ts
+│   │       └── mysql-stored-procedure.executor.ts
+│   ├── Security/
+│   └── Logging/
+├── Common/
+│   ├── Auth/
+│   ├── Authorization/
+│   ├── CompanyContext/
+│   ├── Decorators/
+│   ├── Errors/
+│   ├── Filters/
+│   ├── Guards/
+│   ├── Interceptors/
+│   ├── Middleware/
+│   └── Validation/
+└── Config/
+    ├── configuration.ts
+    ├── database.config.ts
+    ├── security.config.ts
+    └── environment.ts
+```
+
+Los nombres de dominio listados son ejemplos de módulos futuros; no implican que existan implementaciones funcionales. Usar convenciones consistentes con el proyecto real y su sistema de archivos. Si el proyecto ya tiene rutas en minúsculas, decidir y aplicar una migración controlada, no una mezcla arbitraria de estilos.
+
+### Estructura implementada
+
+```text
+src/
+├── Controllers/{Health,Queries}/
+├── Models/{Common,Queries}/
+├── Services/{Health,Queries}/
+├── Repositories/{Contracts,Queries}/
+├── modules/{health,queries}/       # composición e inyección NestJS
+├── infrastructure/database/       # pool y executors MySQL
+├── common/{filters,interceptors,logging}/
 ├── config/
-│   ├── configuration.ts
-│   ├── database.config.ts
-│   ├── security.config.ts
-│   └── environment.ts
-│
-├── common/
-│   ├── auth/
-│   ├── authorization/
-│   ├── company-context/
-│   ├── decorators/
-│   ├── errors/
-│   ├── filters/
-│   ├── guards/
-│   ├── interceptors/
-│   ├── logging/
-│   ├── middleware/
-│   └── validation/
-│
-├── entities/
-│
-├── modules/
-│   ├── auth/
-│   ├── installation/
-│   ├── company/
-│   ├── equipment/
-│   ├── discovery/
-│   ├── extraction-method/
-│   ├── collector/
-│   ├── data-structure/
-│   ├── mapping/
-│   ├── execution/
-│   ├── logs/
-│   ├── storage/
-│   ├── synchronization/
-│   └── query/
-│
-└── infrastructure/
-    ├── database/
-    │   └── mysql/
-    │       ├── mysql.module.ts
-    │       ├── mysql.connection.ts
-    │       ├── mysql-query.executor.ts
-    │       └── mysql-stored-procedure.executor.ts
-    │
-    ├── repositories/
-    │   ├── administration/
-    │   └── query/
-    │
-    ├── security/
-    └── logging/
+├── app.module.ts
+└── main.ts
 ```
 
-Not all modules are implemented in this stage. The skeleton is prepared to allow gradual domain evolution without breaking architecture.
+No se crean carpetas vacías para módulos todavía no desarrollados.
 
-## Future module structure
+## 6. Módulos de negocio previstos
 
-When a domain module is implemented, it should follow this pattern:
+- **Installation:** configuración inicial de la instancia local.
+- **Company:** identidad y datos de la Company asociada a la instalación.
+- **Auth / Users:** autenticación y administración de usuarios locales.
+- **Database:** parámetros y comprobaciones de infraestructura de datos.
+- **Equipment:** inventario de equipos.
+- **Discovery:** descubrimiento de capacidades y datos disponibles.
+- **ExtractionMethod:** protocolos, conexiones, métodos y origen de información.
+- **Collector:** configuración de qué adquirir, con qué frecuencia, cómo transformar y dónde almacenar.
+- **DataStructure / Mapping:** estructuras y mapeos de datos.
+- **Execution / Logs:** consulta de ejecuciones y bitácoras; no sustituyen el scheduler.
+- **Storage:** configuración de destinos, retención y almacenamiento temporal.
+- **Synchronization:** estado, destinos, historial y envío pendiente.
+- **Query:** lecturas y consultas operacionales controladas.
+
+La implementación de cada módulo debe respetar las cuatro responsabilidades principales: Controllers, Models, Services y Repositories.
+
+## 7. MySQL y bases de datos
+
+### 7.1 Base local
+
+La base de datos propia de esta API es **`kindmetricscte`**. La base **`kindmetrics`** corresponde a la plataforma central y no debe configurarse como destino predeterminado de este API.
+
+La separación de bases es lógica y puede desplegarse en distintas instancias según el escenario aprobado.
+
+### 7.2 Infraestructura de acceso
+
+- Centralizar pool y conexiones MySQL.
+- La base predeterminada del Collector es `kindmetricscte`; `MYSQL_DATABASE` se configura por entorno y no se cambia al arrancar.
+- `MySqlQueryExecutor`: SQL parametrizado, conexión y resultados estructurados.
+- `MySqlStoredProcedureExecutor`: ejecución de procedimientos almacenados, parámetros y resultados.
+- Mantener los ejecutores separados; no fusionarlos en uno genérico.
+- Implementar transacciones atómicas cuando el caso de uso lo exija (`BEGIN`, `COMMIT`, `ROLLBACK`).
+- No crear ni alterar tablas automáticamente durante el arranque sin un proceso de migración aprobado.
+- La conexión física se resuelve en el backend; ningún cliente debe decidir arbitrariamente el nombre de la base de datos.
+
+El pool compartido está en `MysqlDatabaseConnection`; Query y Stored Procedure usan executors diferentes. No hay todavía un Repository que invoque procedimientos. `Database/01_schema.sql` crea `kindmetricscte`; el archivo auxiliar `Database/Database KindMetricsCte.sql` usa una variante de mayúsculas y no debe asumirse equivalente en servidores MySQL sensibles a mayúsculas.
+
+### 7.3 Repositorios
 
 ```text
-modules/
-└── collector/
-    ├── collector.module.ts
-    ├── collector.controller.ts
-    ├── collector.service.ts
-    │
-    ├── dto/
-    │   ├── create-collector.dto.ts
-    │   └── update-collector.dto.ts
-    │
-    └── repositories/
-        ├── collector-administration.repository.ts
-        └── collector-query.repository.ts
+Controller -> Service -> Administration Repository Contract
+                              |
+                      StoredProcedures implementation
+                              |
+                      MySqlStoredProcedureExecutor
+                              |
+                      Stored Procedure -> MySQL
+
+Controller -> Service -> Query Repository Contract
+                              |
+                         Queries implementation
+                              |
+                         MySqlQueryExecutor
+                              |
+                         Parameterized SQL -> MySQL
 ```
 
-The concrete repository implementations would live in the infrastructure layer:
+## 8. Usuarios locales, perfiles y autenticación
+
+El modelo local del Collector es **deliberadamente más simple** que el modelo de autorización global de `KindMetricsAPI`.
+
+- Modelo objetivo: tablas `users` y `profiles`.
+- Cada usuario tiene **un solo perfil**.
+- Perfiles iniciales: **`ADMIN`** y **`VIEWER`**.
+- No implementar por ahora permisos individuales, múltiples roles por usuario ni tablas de mapeo rol-permiso.
+- La API verifica en el servidor las operaciones permitidas por perfil; el frontend no es autoridad de autorización.
+- Las contraseñas deben almacenarse con hash robusto, nunca en texto plano.
+- JWT representa la identidad autenticada, pero no sustituye validaciones de estado de usuario y acceso.
+- No registrar contraseñas, JWT completos ni secretos.
+
+La autorización avanzada por recurso/acción/alcance, capacidades y permisos por Company pertenece a la plataforma central y no debe copiarse sin una necesidad aprobada.
+
+**Discrepancia pendiente de esquema:** `Database/01_schema.sql` define actualmente `users`, `roles`, `permissions`, `user_roles` y `role_permissions`; no define `profiles` ni limita a un perfil por usuario. No se modificó la migración porque requiere revisar compatibilidad y datos antes de una transición no destructiva.
+
+## 9. CompanyContext y límites de tenant
+
+La documentación histórica contempla `Authorization: Bearer <JWT>` y `X-Company-Id`; la plataforma central usa `X-Company-Guid` en ciertos endpoints. El código actual no implementa autenticación ni CompanyContext y no interpreta ninguno de esos headers como contexto. **No asumir que el Collector local debe permitir selección arbitraria de Company.**
+
+Para una instalación local asociada a una Company:
+
+1. Autenticar al usuario o servicio.
+2. Resolver la Company configurada para la instalación desde datos confiables del backend.
+3. Validar que la identidad tenga acceso según el modelo local.
+4. Construir el contexto efectivo para la operación.
+5. Rechazar cualquier encabezado de Company que intente sustituir una asociación no autorizada.
+
+**Decisión pendiente:** no se renombró ningún encabezado. El repositorio KindMetricsAPI no está disponible en este workspace y no se encontró consumidor de este API aquí; antes de implementar CompanyContext debe definirse si el Collector local resolverá su Company desde la instalación o si aceptará un header validado.
+
+El frontend no puede seleccionar la base física por nombre.
+
+## 10. Seguridad y consultas
+
+- Autenticación JWT y Guards según los endpoints.
+- Autorización por perfil local y contexto autorizado de Company.
+- DTOs con validación de tipos, UUIDs, enums, rangos y campos requeridos.
+- Prohibido ejecutar SQL arbitrario recibido del frontend sin validación estricta.
+- Validar datasource, tablas y campos permitidos, parámetros, límites, timeout y contexto de acceso para cualquier motor de consultas configurable.
+- Aplicar mínimo privilegio en usuarios MySQL.
+- No exponer SQL, stack traces, cadenas de conexión ni secretos en respuestas HTTP.
+
+## 11. Contrato HTTP y manejo de errores
+
+Los Controllers deben devolver contratos consistentes y delegar el manejo de errores a filtros/interceptores compartidos. Como **convención objetivo sujeta a compatibilidad** con clientes existentes, puede utilizarse:
+
+```ts
+interface ApiResponse<T> {
+  success: boolean;
+  message: string;
+  data: T | null;
+  errors: string[];
+  meta?: { requestId?: string };
+}
+```
+
+El contrato implementado actualmente usa `errors: ApiError[]` (cada error contiene `code`, `message` y `field` opcional) y `meta.requestId` obligatorio. El ejemplo objetivo anterior (`errors: string[]` y metadata opcional) no es idéntico; no se cambió porque no se pudo verificar compatibilidad de consumidores. Health y Queries usan el envelope centralizado en `src/Models/Common/api-response.dto.ts` y los mecanismos globales.
+
+El manejo centralizado debe contemplar errores HTTP, de validación, autenticación, autorización, aplicación y persistencia. Los mensajes públicos no deben revelar detalles internos.
+
+## 12. Configuración por entornos
+
+Archivos por entorno existentes:
 
 ```text
-infrastructure/
-└── repositories/
-    ├── administration/
-    │   └── collector-administration.repository.impl.ts
-    │
-    └── query/
-        └── collector-query.repository.impl.ts
+.env.example
+.env.dev
+.env.qa
+.env.prod
 ```
 
-## Authentication model
+La Company no se determina mediante un valor enviado sin validar por el frontend; en instalaciones locales se resuelve según la asociación confiable de la instancia.
 
-JWT is the base REST authentication mechanism.
+## 13. Logging y observabilidad
 
-The intended flow is:
+Distinguir:
 
-Login
-    ↓
-Credential validation
-    ↓
-JWT generation
-    ↓
-KindMetrics-UI
-    ↓
-Authorization: Bearer <JWT>
+- **Logs técnicos:** solicitudes, fallos de autenticación/autorización, errores de base, arranque y cierre.
+- **Logs de ejecución de Collector:** adquisiciones, mapeos, almacenamiento y sincronización, asociados a sus procesos funcionales.
 
-A complex refresh-token mechanism is not implemented in this initial phase unless the architecture explicitly requires it later.
+No registrar contraseñas, tokens completos, secretos ni cadenas de conexión completas. Correlacionar operaciones mediante identificadores de solicitud cuando sea posible.
 
-## Axios restriction
+## 14. NestJS y adaptador HTTP
 
-Axios is not used as the MySQL communication mechanism inside this API.
+NestJS y TypeScript son decisiones del proyecto. Conservar módulos NestJS para composición e inyección de dependencias.
 
-Axios is mainly for client-side HTTP consumption, such as UI applications.
+El adaptador activo es `@nestjs/platform-fastify`; `main.ts` registra Swagger en `/docs` y OpenAPI en `/docs/json`. Host y puerto se leen de `API_HOST` y `API_PORT`. Express no forma parte del adaptador HTTP activo.
 
-The API uses:
+Axios no se utiliza para conectarse a MySQL. Integraciones HTTP externas futuras deben implementarse mediante clientes específicos y justificados.
 
-- NestJS HTTP layer
-- MySQL driver
-- repository pattern
-- MySQL executors
+## 15. Relación con Collector-BS
 
-Only if a future module needs external HTTP integration will a dedicated client mechanism be evaluated.
-
-## Collector-BS relationship
-
-Collector-BS is not implemented in this stage.
-
-The architecture is, however, prepared for a future pattern:
-
+```text
 KindMetrics-Cli-Collector-API
-        ↓
-configuration and administration
-        ↓
+       | configuración / administración
+       v
 KindMetrics-Cli-Collector-BS
-        ↓
+       |
+       v
 Scheduler
-        ↓
+       |
+       v
 Extraction Methods
-        ↓
+       |
+       v
 Mapping
-        ↓
-Storage
+       |
+       v
+Storage (servidor y/o local temporal)
+       |
+       v
+Synchronization (cuando aplique)
+```
 
-The API remains the authority for configuration and management; it does not become the scheduler of acquisition.
+La API es autoridad de configuración y administración; **no** incorpora el scheduler de adquisición. La frecuencia de recolección pertenece al **Collector**, no al **ExtractionMethod**:
 
-## Frequency domain rule
+- `ExtractionMethod`: cómo conectarse, qué fuente consultar y qué información está disponible.
+- `Collector`: qué obtener, cuándo, cómo transformar y a qué destino enviar o almacenar.
 
-Acquisition frequency belongs to the Collector domain and not to the Extraction Method.
+El almacenamiento local temporal es opcional según la configuración aprobada; no debe imponerse como destino permanente ni como paso obligatorio de todas las ejecuciones.
 
-- ExtractionMethod: how to connect, from where to fetch data, what is available
-- Collector: what to fetch, when to fetch, how to transform, where to store
+## 16. Endpoints y compatibilidad
 
-## Important rules
+Rutas comprobadas en el código:
 
-The architecture explicitly forbids:
+- `GET /health`: devuelve envelope uniforme y `data` indica `status` (`ok` o `degraded`) y `database` (`connected` o `disconnected`), mediante `SELECT 1`.
+- `POST /api/v1/queries/execute`: valida `query`, `datasourceGuid` y parámetros con Zod y devuelve 501 intencionalmente; no ejecuta SQL.
+- `GET /docs` y `GET /docs/json`: Swagger UI y documento OpenAPI.
 
-- SQL in controllers
-- SQL in services
-- direct controller-to-MySQL access
-- TypeORM as the primary persistence mechanism
-- a single generic repository mixing administration and query work
-- arbitrary SQL from the frontend without validation
-- blind trusting of X-Company-Id
-- frontend deciding the physical database name
-- storing secrets in code or logs
-- putting the acquisition scheduler into the API
-- duplicating Company access logic in every service
+No crear endpoints funcionales simulados para aparentar que un módulo está terminado.
 
-The architecture explicitly allows:
+## 17. Reglas de refactorización
 
-- JWT
-- CompanyContext
-- X-Company-Id validation
-- authorization checks
-- DTO validation
-- services
-- entities
-- repository pattern
-- administration repositories
-- query repositories
-- stored procedure executor
-- query executor
-- MySQL connection pool
-- transactions
-- centralized configuration
-- centralized error handling
-- centralized logging
-- ESLint
-- Prettier
+1. Inspeccionar el repositorio actual y la documentación global antes de modificar archivos.
+2. Identificar Controllers, Models/DTOs, Services, Contracts, Implementations e Infrastructure existentes.
+3. Mover código solo cuando mejore la separación de responsabilidades.
+4. Mantener nombres de rutas, contratos y comportamiento salvo decisión explícita.
+5. Actualizar imports, módulos NestJS, providers y tokens de DI.
+6. Evitar duplicar modelos o mantener simultáneamente dos implementaciones equivalentes.
+7. No eliminar tablas, migraciones, configuraciones ni documentación aprobada.
+8. No crear carpetas vacías o clases sin funcionalidad solo para completar un diagrama.
+9. Comprobar build, lint, tipado y pruebas después de cada etapa.
+10. Reportar diferencias entre arquitectura objetivo y código implementado.
 
-## Scope of this first stage
+## 18. Restricciones explícitas
 
-This stage does not implement complete business functionality. It creates the correct base architecture for the API.
+Queda prohibido:
 
-The following are created as part of the technical foundation:
+- SQL o acceso directo a MySQL desde Controllers y Services.
+- Llamar Stored Procedures desde Controllers.
+- Dependencia directa de Services en implementaciones concretas de persistencia.
+- Mezclar lógica de negocio con repositorios.
+- Utilizar TypeORM como persistencia principal sin aprobación.
+- Ejecutar consultas arbitrarias del frontend sin controles.
+- Confiar ciegamente en `X-Company-Id` o en cualquier encabezado equivalente.
+- Permitir que el frontend determine la base física.
+- Guardar secretos en código o logs.
+- Ejecutar el scheduler de adquisición dentro de esta API.
+- Copiar al Collector el modelo complejo de permisos del backend central sin aprobación.
 
-- NestJS project
-- TypeScript
-- ESLint
-- Prettier
-- environment configuration
-- centralized configuration
-- project structure
-- common layer
-- base entities structure
-- infrastructure layer
-- MySQL module
-- MySQL connection
-- query executor
-- stored procedure executor
-- base repository contracts
-- centralized error handling
-- base logging
-- JWT infrastructure base
-- CompanyContext infrastructure base
-- guards base
-- validation base
-- health endpoint
+## 19. Comandos de desarrollo
 
-The following are intentionally not implemented yet:
-
-- complete Business CRUD modules
-- full domain logic for Company, Equipment, Collector, Mapping, Storage and similar
-
-## Documentation rule
-
-Before implementing files or modules, the project must inspect the current repository state and any existing documentation. Existing documentation is never replaced or deleted. If the architecture is not fully defined, no silent guesses are introduced.
-
-## Final objective
-
-The first stage must leave a functional NestJS base API with:
-
-- solid folder structure
-- layered architecture
-- environment configuration
-- base entities
-- MySQL infrastructure
-- repository abstraction
-- error handling
-- logging
-- JWT and CompanyContext groundwork
-- validation layer
-- health endpoint
-
-The work is intentionally limited to architecture and infrastructure so the future business modules can be developed consistently without architectural debt.
-
-## Commands
-
-Typical commands for this stage:
+Comandos previstos, sujetos a los scripts definidos realmente en `package.json`:
 
 ```bash
 npm install
@@ -698,10 +433,40 @@ npm run lint
 npm run format
 npm run format:check
 npm run type-check
+npm run check
 ```
 
-## Status
+`npm run check` ejecuta lint, type-check y build. No hay script ni archivos de pruebas automatizadas actualmente.
 
-This repository is in the technical-base phase and is not yet a complete business implementation.
+## 20. Documentación y fuente de verdad
 
-The next stages will continue by creating the domain modules in a controlled order, always preserving the architectural boundaries already established here.
+La documentación global de KindMetrics reside en la carpeta **`docs/` del workspace** y contiene las decisiones transversales de arquitectura, Companies, Collector, almacenamiento y sincronización. Este proyecto mantiene su propio `README.md`, que documenta las decisiones específicas del Collector API.
+
+- No regenerar ni sobrescribir la documentación global.
+- No crear una carpeta `docs/` duplicada dentro del proyecto por defecto.
+- Actualizar documentos existentes de manera incremental.
+- No reemplazar decisiones aprobadas por supuestos silenciosos.
+- Si una decisión del README contradice documentación global vigente, señalar la discrepancia y solicitar resolución antes de romper compatibilidad.
+
+## 21. Criterios de aceptación
+
+La homologación arquitectónica se considera completa cuando:
+
+- Los Controllers delegan en Services y no acceden a persistencia.
+- Los Services usan contratos de repositorios.
+- Models/DTOs están organizados sin duplicaciones innecesarias.
+- Los Repositories separan `StoredProcedures` y `Queries`.
+- Los ejecutores MySQL permanecen separados y parametrizados.
+- NestJS resuelve correctamente las dependencias.
+- Se conserva el comportamiento de endpoints existentes.
+- La base configurada para el Collector es `kindmetricscte`.
+- El modelo local de usuarios respeta `ADMIN` / `VIEWER`, un perfil por usuario.
+- Se respetan límites entre API, Collector-BS y plataforma central.
+- Compilación, lint y pruebas disponibles finalizan correctamente o sus fallos se documentan.
+- El README describe fielmente qué está implementado y qué permanece planificado.
+
+## 22. Estado auditado y próximos pasos
+
+La homologación actual es parcial. Health sigue Controller → Service → Repository Contract → Repository Implementation → Query Executor → MySQL. Query conserva controller, DTO/Zod y service, pero su ejecución queda deliberadamente bloqueada. No hay casos de uso que requieran Stored Procedures todavía.
+
+Pendientes prioritarios: decidir CompanyContext/header compatible; resolver sin pérdida de datos la discrepancia `profiles` frente a `roles` del SQL existente; implementar Auth/JWT y autorización por el perfil local aprobado; añadir pruebas automatizadas; desarrollar repositorios solo cuando existan contratos y casos de uso concretos; acordar el contrato de errores con consumidores antes de cambiarlo.

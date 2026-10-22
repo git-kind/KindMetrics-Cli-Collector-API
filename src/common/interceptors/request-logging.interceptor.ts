@@ -4,7 +4,7 @@ import {
   Injectable,
   NestInterceptor,
 } from '@nestjs/common';
-import { Request } from 'express';
+import { FastifyRequest } from 'fastify';
 import { Observable, tap } from 'rxjs';
 import { AppLogger } from '../logging/app-logger.service';
 
@@ -13,12 +13,12 @@ export class RequestLoggingInterceptor implements NestInterceptor {
   constructor(private readonly logger: AppLogger) {}
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
-    const request = context.switchToHttp().getRequest<Request>();
+    const request = context.switchToHttp().getRequest<FastifyRequest>();
     const startedAt = Date.now();
 
     return next.handle().pipe(
       tap(() => {
-        const routePath = request.route?.path ?? request.path;
+        const routePath = request.routeOptions.url ?? request.url;
         this.logger.log(
           `${request.method} ${routePath} ${Date.now() - startedAt}ms`,
         );
