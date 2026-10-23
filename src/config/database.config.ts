@@ -7,4 +7,6 @@ export default registerAs('database', () => ({
   password: process.env.MYSQL_PASSWORD,
   database: process.env.MYSQL_DATABASE ?? 'kindmetricscte',
   connectionLimit: Number(process.env.MYSQL_CONNECTION_LIMIT ?? 10),
+  connectTimeout: Number(process.env.MYSQL_CONNECT_TIMEOUT ?? 5000),
+  queueLimit: Number(process.env.MYSQL_QUEUE_LIMIT ?? 0),
 }));

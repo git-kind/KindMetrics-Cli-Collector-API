@@ -19,6 +19,11 @@ export class MySqlStoredProcedureExecutor {
     const [result] = await this.connection
       .getPool()
       .query(statement, parameters);
+
+    if (Array.isArray(result) && Array.isArray(result[0])) {
+      return result[0] as TResult;
+    }
+
     return result as TResult;
   }
 }

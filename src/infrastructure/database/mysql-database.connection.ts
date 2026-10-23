@@ -16,6 +16,9 @@ export class MysqlDatabaseConnection
       password: config.get<string>('database.password') ?? '',
       database: config.get<string>('database.database') ?? 'kindmetricscte',
       connectionLimit: config.get<number>('database.connectionLimit') ?? 10,
+      connectTimeout: config.get<number>('database.connectTimeout') ?? 5000,
+      waitForConnections: true,
+      queueLimit: config.get<number>('database.queueLimit') ?? 0,
     });
   }
 

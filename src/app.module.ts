@@ -5,9 +5,11 @@ import apiConfig from './config/api.config';
 import databaseConfig from './config/database.config';
 import environmentConfig from './config/environment.config';
 import installationConfig from './config/installation.config';
+import authConfig from './config/auth.config';
 import { DatabaseModule } from './infrastructure/database/database.module';
 import { HealthModule } from './modules/health/health.module';
 import { QueriesModule } from './modules/queries/queries.module';
+import { AuthModule } from './modules/auth/auth.module';
 
 @Module({
   imports: [
@@ -24,11 +26,13 @@ import { QueriesModule } from './modules/queries/queries.module';
         databaseConfig,
         installationConfig,
         environmentConfig,
+        authConfig,
       ],
     }),
     DatabaseModule,
     HealthModule,
     QueriesModule,
+    AuthModule,
   ],
   providers: [AppLogger],
 })

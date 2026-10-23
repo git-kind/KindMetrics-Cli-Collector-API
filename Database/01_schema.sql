@@ -35,21 +35,15 @@ CREATE TABLE IF NOT EXISTS `collector_instance` (
 CREATE TABLE IF NOT EXISTS `users` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   `guid` CHAR(36) NOT NULL,
-  `company_id` BIGINT UNSIGNED NOT NULL,
-  `email` VARCHAR(254) NOT NULL,
-  `name` VARCHAR(200) NOT NULL,
-  `password_hash` VARCHAR(255) NULL,
-  `auth_source` ENUM('LOCAL','CENTRAL') NOT NULL DEFAULT 'CENTRAL',
-  `central_user_guid` CHAR(36) NULL,
-  `status` ENUM('ACTIVE','INACTIVE','LOCKED') NOT NULL DEFAULT 'ACTIVE',
-  `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  `email` VARCHAR(255) NOT NULL,
+  `name` VARCHAR(160) NOT NULL,
+  `password_hash` VARCHAR(255) NOT NULL,
+  `status` VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+  `is_platform_admin` TINYINT(1) NOT NULL DEFAULT '0',
+  `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY `uq_users_guid` (`guid`),
-  UNIQUE KEY `uq_users_company_email` (`company_id`,`email`),
-  KEY `ix_users_central_guid` (`central_user_guid`),
-  CONSTRAINT `fk_users_company` FOREIGN KEY (`company_id`) REFERENCES `company` (`id`),
-  CONSTRAINT `chk_users_auth_source` CHECK ((`auth_source`='CENTRAL' AND `central_user_guid` IS NOT NULL AND `password_hash` IS NULL) OR (`auth_source`='LOCAL' AND `password_hash` IS NOT NULL))
-) ENGINE=InnoDB;
+  UNIQUE KEY `uq_users_email` (`email`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 CREATE TABLE IF NOT EXISTS `permissions` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   `code` VARCHAR(120) NOT NULL,

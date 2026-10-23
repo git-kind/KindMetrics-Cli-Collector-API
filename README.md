@@ -2,7 +2,7 @@
 
 > **Proyecto:** KindMetrics
 > **Componente:** API local del Collector (también denominada informalmente `KindMetricsCte-API`)
-> **Estado auditado:** 22-10-2026. NestJS con Fastify; implementados `GET /health` y `POST /api/v1/queries/execute` (este último responde 501 intencionalmente). No hay todavía autenticación, CompanyContext ni CRUD funcional.
+> **Estado auditado:** 23-10-2026. NestJS con Fastify; implementados `POST /api/v1/auth/login`, `GET /health` y `POST /api/v1/queries/execute` (este último responde 501 intencionalmente). El CRUD de usuarios está definido en Stored Procedures; no existe aún una API HTTP CRUD para usuarios.
 > **Fuente:** decisiones globales en `docs/`; el estado de implementación se contrasta con el código de este repositorio.
 
 ## 1. Objetivo
@@ -15,9 +15,9 @@ El proyecto debe mantener convenciones arquitectónicas compatibles con `KindMet
 
 ## 2. Alcance y estado
 
-La implementación actual contiene NestJS, TypeScript, Fastify, Swagger, validación HTTP, manejo centralizado de errores, logging, health check y un pool MySQL. `GET /health` consulta `SELECT 1` mediante Controller → Service → contrato de Repository → implementación MySQL → Query Executor. `POST /api/v1/queries/execute` valida su DTO con Zod y responde 501 sin ejecutar SQL.
+La implementación actual contiene NestJS, TypeScript, Fastify, Swagger, validación HTTP, manejo centralizado de errores, logging, health check, login local y un pool MySQL. `GET /health` consulta `SELECT 1` mediante Controller → Service → contrato de Repository → implementación MySQL → Query Executor. `POST /api/v1/auth/login` consulta el usuario mediante Stored Procedure, valida el hash bcrypt y emite JWT. `POST /api/v1/queries/execute` valida su DTO con Zod y responde 501 sin ejecutar SQL.
 
-No están implementados Auth/JWT, Guards, CompanyContext, CRUD administrativo, sincronización ni conexión con Collector-BS. Los módulos funcionales se incorporarán gradualmente; la arquitectura objetivo descrita en este README no afirma que esas funcionalidades ya existan.
+No están implementados Guards para proteger rutas, CompanyContext, API HTTP de CRUD administrativo, sincronización ni conexión con Collector-BS. El SQL define procedimientos CRUD de usuarios, pero aún no tienen controller/service HTTP asociados. Los módulos funcionales restantes se incorporarán gradualmente; la arquitectura objetivo descrita en este README no afirma que esas funcionalidades ya existan.
 
 ## 3. Principios obligatorios
 
@@ -70,6 +70,7 @@ Los Guards, Filters, Interceptors, Logging, Config y CompanyContext son mecanism
 - No implementan reglas de negocio ni instancian repositorios concretos.
 
 **Implementado:** `src/Controllers/Health/` y `src/Controllers/Queries/`. Los módulos Nest que los componen permanecen en `src/modules/`.
+`src/Controllers/Auth/` expone `POST /api/v1/auth/login`.
 
 ### 4.2 Models
 
@@ -81,7 +82,7 @@ Los Guards, Filters, Interceptors, Logging, Config y CompanyContext son mecanism
 - No contienen acceso a bases de datos ni lógica de negocio.
 - Evitar definiciones duplicadas entre `entities/`, `modules/*/dto/` y `Models/`.
 
-Los DTOs HTTP existentes están centralizados en `src/Models/`; no hay modelos de dominio funcionales todavía.
+Los DTOs HTTP existentes están centralizados en `src/Models/`, incluidos `Models/Auth/LoginRequestDto` y `LoginResponseDto`; no hay modelos de dominio funcionales todavía.
 
 **Distinción:** los contratos de repositorios pueden ubicarse en `Repositories/Contracts/`; los Models no deben convertirse en un depósito de dependencias de infraestructura.
 
@@ -95,7 +96,7 @@ Los DTOs HTTP existentes están centralizados en `src/Models/`; no hay modelos d
 - Solicitan transacciones mediante contratos de infraestructura cuando corresponda.
 - No ejecutan SQL ni Stored Procedures, no importan `mysql2` y no leen `process.env` de manera dispersa.
 
-**Implementado:** `HealthService` depende de `HealthRepository`; `QueriesService` mantiene el resultado 501 previsto. No existen aún Services de autenticación, usuarios, Company o sincronización.
+**Implementado:** `HealthService` depende de `HealthRepository`; `AuthService` depende de `AuthRepository`, verifica bcrypt y firma JWT; `QueriesService` mantiene el resultado 501 previsto. No existen aún Services de usuarios, Company o sincronización.
 
 ### 4.4 Repositories
 
@@ -108,7 +109,7 @@ Los DTOs HTTP existentes están centralizados en `src/Models/`; no hay modelos d
 - No implementan reglas de negocio.
 - No se crea un repositorio genérico único que mezcle administración, escritura, consultas analíticas y acceso directo a conexiones.
 
-**Implementado:** `HealthRepository` y `MySqlHealthRepository` para comprobar la conexión. No hay implementaciones de repositorio Stored Procedures porque todavía no hay casos de uso administrativos; existe el executor de infraestructura separado.
+**Implementado:** `HealthRepository`/`MySqlHealthRepository` y `AuthRepository`/`MySqlAuthRepository`. Este último usa `sp_users_get_by_email`; los procedimientos CRUD están preparados en SQL, pero todavía no existe controller/service HTTP para administrarlos.
 
 ### 4.5 Infrastructure
 
@@ -187,11 +188,11 @@ Los nombres de dominio listados son ejemplos de módulos futuros; no implican qu
 
 ```text
 src/
-├── Controllers/{Health,Queries}/
-├── Models/{Common,Queries}/
-├── Services/{Health,Queries}/
-├── Repositories/{Contracts,Queries}/
-├── modules/{health,queries}/       # composición e inyección NestJS
+├── Controllers/{Auth,Health,Queries}/
+├── Models/{Auth,Common,Queries}/
+├── Services/{Auth,Health,Queries}/
+├── Repositories/{Contracts,Queries,StoredProcedures}/
+├── modules/{auth,health,queries}/  # composición e inyección NestJS
 ├── infrastructure/database/       # pool y executors MySQL
 ├── common/{filters,interceptors,logging}/
 ├── config/
@@ -233,6 +234,7 @@ La separación de bases es lógica y puede desplegarse en distintas instancias s
 - La base predeterminada del Collector es `kindmetricscte`; `MYSQL_DATABASE` se configura por entorno y no se cambia al arrancar.
 - `MySqlQueryExecutor`: SQL parametrizado, conexión y resultados estructurados.
 - `MySqlStoredProcedureExecutor`: ejecución de procedimientos almacenados, parámetros y resultados.
+- La autenticación usa `sp_users_get_by_email`; el hash solo se selecciona en este procedimiento y nunca se incluye en el DTO de respuesta.
 - Mantener los ejecutores separados; no fusionarlos en uno genérico.
 - Implementar transacciones atómicas cuando el caso de uso lo exija (`BEGIN`, `COMMIT`, `ROLLBACK`).
 - No crear ni alterar tablas automáticamente durante el arranque sin un proceso de migración aprobado.
@@ -332,6 +334,8 @@ Archivos por entorno existentes:
 .env.prod
 ```
 
+`JWT_SECRET` debe ser un secreto aleatorio de al menos 32 bytes configurado en el entorno activo. No se almacena ni se incluye en el repositorio. `JWT_EXPIRES_IN` indica la duración en segundos (predeterminado 900).
+
 La Company no se determina mediante un valor enviado sin validar por el frontend; en instalaciones locales se resuelve según la asociación confiable de la instancia.
 
 ## 13. Logging y observabilidad
@@ -386,9 +390,31 @@ El almacenamiento local temporal es opcional según la configuración aprobada; 
 
 Rutas comprobadas en el código:
 
+- `POST /api/v1/auth/login`: valida correo/contraseña, verifica bcrypt y devuelve un JWT y datos públicos del usuario. Requiere `JWT_SECRET`.
 - `GET /health`: devuelve envelope uniforme y `data` indica `status` (`ok` o `degraded`) y `database` (`connected` o `disconnected`), mediante `SELECT 1`.
 - `POST /api/v1/queries/execute`: valida `query`, `datasourceGuid` y parámetros con Zod y devuelve 501 intencionalmente; no ejecuta SQL.
 - `GET /docs` y `GET /docs/json`: Swagger UI y documento OpenAPI.
+
+El login no crea usuarios. Los procedimientos de `Database/02_users_auth_procedures.sql` permiten CRUD a nivel de base de datos; no deben exponerse directamente hasta definir autorización de administración.
+
+### Instalación de usuarios y autenticación
+
+Para una instalación nueva, ejecutar primero el esquema y después los procedimientos, en la base local del Collector:
+
+```powershell
+mysql -u root -p < Database/01_schema.sql
+mysql -u root -p kindmetricscte < Database/02_users_auth_procedures.sql
+```
+
+`Database/01_schema.sql` es para una instalación nueva. No ejecutar sobre una base existente sin revisar migraciones, dependencias y datos. El SQL no se aplicó desde este entorno: no hay conexión SQL disponible a `kindmetricscte`.
+
+Configurar `JWT_SECRET` como valor aleatorio de 32 bytes o más en el archivo de entorno activo. Para generar uno localmente con Node:
+
+```powershell
+node -e "console.log(require('node:crypto').randomBytes(48).toString('base64'))"
+```
+
+Crear el primer usuario mediante un proceso administrativo controlado que almacene un hash bcrypt en `password_hash`; no guardar contraseñas en texto plano ni registrar el hash.
 
 No crear endpoints funcionales simulados para aparentar que un módulo está terminado.
 
@@ -469,4 +495,4 @@ La homologación arquitectónica se considera completa cuando:
 
 La homologación actual es parcial. Health sigue Controller → Service → Repository Contract → Repository Implementation → Query Executor → MySQL. Query conserva controller, DTO/Zod y service, pero su ejecución queda deliberadamente bloqueada. No hay casos de uso que requieran Stored Procedures todavía.
 
-Pendientes prioritarios: decidir CompanyContext/header compatible; resolver sin pérdida de datos la discrepancia `profiles` frente a `roles` del SQL existente; implementar Auth/JWT y autorización por el perfil local aprobado; añadir pruebas automatizadas; desarrollar repositorios solo cuando existan contratos y casos de uso concretos; acordar el contrato de errores con consumidores antes de cambiarlo.
+Pendientes prioritarios: decidir CompanyContext/header compatible; resolver sin pérdida de datos la discrepancia `profiles` frente a `roles` del esquema existente; proteger rutas con Guards/JWT; añadir política de autorización para CRUD; añadir pruebas automatizadas; acordar el contrato de errores con consumidores antes de cambiarlo.
