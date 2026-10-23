@@ -17,8 +17,22 @@ async function bootstrap(): Promise<void> {
   );
   const logger = app.get(AppLogger);
   const config = app.get(ConfigService);
+  const corsOrigins = config.get<string[]>('api.corsOrigins') ?? [];
 
   app.useLogger(logger);
+  app.enableCors({
+    origin: corsOrigins,
+    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: [
+      'Accept',
+      'Authorization',
+      'Content-Type',
+      'X-Company-Id',
+      'X-Company-Guid',
+    ],
+    credentials: false,
+    optionsSuccessStatus: 204,
+  });
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
