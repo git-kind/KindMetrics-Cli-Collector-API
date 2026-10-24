@@ -2,7 +2,7 @@
 
 > **Proyecto:** KindMetrics
 > **Componente:** API local del Collector (también denominada informalmente `KindMetricsCte-API`)
-> **Estado auditado:** 23-10-2026. NestJS con Fastify; implementados `POST /api/v1/auth/login`, `GET /health` y `POST /api/v1/queries/execute` (este último responde 501 intencionalmente). El CRUD de usuarios está definido en Stored Procedures; no existe aún una API HTTP CRUD para usuarios.
+> **Estado auditado:** 23-10-2026. NestJS con Fastify; implementados login, health, CRUD de Companies, creación explícita de base por Company protegida para administradores y `POST /api/v1/queries/execute` (501 intencionalmente). El CRUD de usuarios está definido en Stored Procedures; no existe aún una API HTTP CRUD para usuarios.
 > **Fuente:** decisiones globales en `docs/`; el estado de implementación se contrasta con el código de este repositorio.
 
 ## 1. Objetivo
@@ -15,9 +15,9 @@ El proyecto debe mantener convenciones arquitectónicas compatibles con `KindMet
 
 ## 2. Alcance y estado
 
-La implementación actual contiene NestJS, TypeScript, Fastify, Swagger, validación HTTP, manejo centralizado de errores, logging, health check, login local y un pool MySQL. `GET /health` consulta `SELECT 1` mediante Controller → Service → contrato de Repository → implementación MySQL → Query Executor. `POST /api/v1/auth/login` consulta el usuario mediante Stored Procedure, valida el hash bcrypt y emite JWT. `POST /api/v1/queries/execute` valida su DTO con Zod y responde 501 sin ejecutar SQL.
+La implementación actual contiene NestJS, TypeScript, Fastify, Swagger, validación HTTP, manejo centralizado de errores, logging, health check, login local, CRUD de Companies y un pool MySQL. `GET /health` consulta `SELECT 1` mediante Controller → Service → contrato de Repository → implementación MySQL → Query Executor. El login consulta por Stored Procedure, verifica Argon2 y emite JWT. El CRUD de Companies y la creación explícita de su base usan Stored Procedures y requieren JWT de plataforma administradora. La operación crea solo el schema vacío `km_company_<guid-sin-guiones>`; no crea tablas ni copia datos. `POST /api/v1/queries/execute` valida su DTO con Zod y responde 501 sin ejecutar SQL.
 
-No están implementados Guards para proteger rutas, CompanyContext, API HTTP de CRUD administrativo, sincronización ni conexión con Collector-BS. El SQL define procedimientos CRUD de usuarios, pero aún no tienen controller/service HTTP asociados. Los módulos funcionales restantes se incorporarán gradualmente; la arquitectura objetivo descrita en este README no afirma que esas funcionalidades ya existan.
+El guard actual valida el JWT y el claim `isPlatformAdmin` para las rutas de Company; aún no valida revocación/estado del usuario en cada request ni implementa CompanyContext, sincronización o conexión con Collector-BS. El SQL define procedimientos CRUD de usuarios, pero todavía no hay controller/service HTTP asociados. Los módulos funcionales restantes se incorporarán gradualmente.
 
 ## 3. Principios obligatorios
 
@@ -69,8 +69,7 @@ Los Guards, Filters, Interceptors, Logging, Config y CompanyContext son mecanism
 - No ejecutan SQL, Stored Procedures ni consultas con `mysql2`.
 - No implementan reglas de negocio ni instancian repositorios concretos.
 
-**Implementado:** `src/Controllers/Health/` y `src/Controllers/Queries/`. Los módulos Nest que los componen permanecen en `src/modules/`.
-`src/Controllers/Auth/` expone `POST /api/v1/auth/login`.
+**Implementado:** `src/Controllers/Health/`, `src/Controllers/Queries/`, `src/Controllers/Auth/` y `src/Controllers/Company/`. Los módulos Nest de composición permanecen en `src/modules/`.
 
 ### 4.2 Models
 
@@ -96,7 +95,7 @@ Los DTOs HTTP existentes están centralizados en `src/Models/`, incluidos `Model
 - Solicitan transacciones mediante contratos de infraestructura cuando corresponda.
 - No ejecutan SQL ni Stored Procedures, no importan `mysql2` y no leen `process.env` de manera dispersa.
 
-**Implementado:** `HealthService` depende de `HealthRepository`; `AuthService` depende de `AuthRepository`, verifica bcrypt y firma JWT; `QueriesService` mantiene el resultado 501 previsto. No existen aún Services de usuarios, Company o sincronización.
+**Implementado:** `HealthService`, `AuthService`, `CompanyService` y `QueriesService`. Auth verifica Argon2 y emite JWT; Company coordina su repositorio y maneja conflictos y referencias existentes.
 
 ### 4.4 Repositories
 
@@ -109,7 +108,7 @@ Los DTOs HTTP existentes están centralizados en `src/Models/`, incluidos `Model
 - No implementan reglas de negocio.
 - No se crea un repositorio genérico único que mezcle administración, escritura, consultas analíticas y acceso directo a conexiones.
 
-**Implementado:** `HealthRepository`/`MySqlHealthRepository` y `AuthRepository`/`MySqlAuthRepository`. Este último usa `sp_users_get_by_email`; los procedimientos CRUD están preparados en SQL, pero todavía no existe controller/service HTTP para administrarlos.
+**Implementado:** Health y Auth usan contratos separados; Company usa `CompanyRepository`/`MySqlCompanyRepository` mediante procedimientos `sp_companies_*`.
 
 ### 4.5 Infrastructure
 
@@ -188,11 +187,11 @@ Los nombres de dominio listados son ejemplos de módulos futuros; no implican qu
 
 ```text
 src/
-├── Controllers/{Auth,Health,Queries}/
-├── Models/{Auth,Common,Queries}/
-├── Services/{Auth,Health,Queries}/
+├── Controllers/{Auth,Company,Health,Queries}/
+├── Models/{Auth,Common,Company,Queries}/
+├── Services/{Auth,Company,Health,Queries}/
 ├── Repositories/{Contracts,Queries,StoredProcedures}/
-├── modules/{auth,health,queries}/  # composición e inyección NestJS
+├── modules/{auth,companies,health,queries}/  # composición e inyección NestJS
 ├── infrastructure/database/       # pool y executors MySQL
 ├── common/{filters,interceptors,logging}/
 ├── config/
@@ -240,7 +239,7 @@ La separación de bases es lógica y puede desplegarse en distintas instancias s
 - No crear ni alterar tablas automáticamente durante el arranque sin un proceso de migración aprobado.
 - La conexión física se resuelve en el backend; ningún cliente debe decidir arbitrariamente el nombre de la base de datos.
 
-El pool compartido está en `MysqlDatabaseConnection`; Query y Stored Procedure usan executors diferentes. No hay todavía un Repository que invoque procedimientos. `Database/01_schema.sql` crea `kindmetricscte`; el archivo auxiliar `Database/Database KindMetricsCte.sql` usa una variante de mayúsculas y no debe asumirse equivalente en servidores MySQL sensibles a mayúsculas.
+El pool compartido está en `MysqlDatabaseConnection`; Query y Stored Procedure usan executors diferentes. `Database/03_company_short_name_and_crud.sql` agrega `company.short_name` sin descartar datos. `Database/04_company_database.sql` agrega `company.database_name` y `sp_companies_create_database` (migración `1.2.0`). El nombre se deriva en el servidor del GUID validado. El DEFINER del procedimiento necesita privilegio `CREATE`; la operación solo crea un schema vacío y no instala tablas.
 
 ### 7.3 Repositorios
 
@@ -281,7 +280,7 @@ La autorización avanzada por recurso/acción/alcance, capacidades y permisos po
 
 ## 9. CompanyContext y límites de tenant
 
-La documentación histórica contempla `Authorization: Bearer <JWT>` y `X-Company-Id`; la plataforma central usa `X-Company-Guid` en ciertos endpoints. El código actual no implementa autenticación ni CompanyContext y no interpreta ninguno de esos headers como contexto. **No asumir que el Collector local debe permitir selección arbitraria de Company.**
+La documentación histórica contempla `Authorization: Bearer <JWT>` y `X-Company-Id`; la plataforma central usa `X-Company-Guid` en ciertos endpoints. El código actual autentica con JWT y protege el CRUD de Companies para administradores de plataforma, pero todavía no implementa CompanyContext ni interpreta esos headers como contexto. **No asumir que el Collector local debe permitir selección arbitraria de Company.**
 
 Para una instalación local asociada a una Company:
 
@@ -390,9 +389,11 @@ El almacenamiento local temporal es opcional según la configuración aprobada; 
 
 Rutas comprobadas en el código:
 
-- `POST /api/v1/auth/login`: valida correo/contraseña, verifica bcrypt y devuelve un JWT y datos públicos del usuario. Requiere `JWT_SECRET`.
+- `POST /api/v1/auth/login`: valida correo/contraseña, verifica Argon2id y devuelve un JWT y datos públicos del usuario. Requiere `JWT_SECRET`.
 - `GET /health`: devuelve envelope uniforme y `data` indica `status` (`ok` o `degraded`) y `database` (`connected` o `disconnected`), mediante `SELECT 1`.
 - `POST /api/v1/queries/execute`: valida `query`, `datasourceGuid` y parámetros con Zod y devuelve 501 intencionalmente; no ejecuta SQL.
+- `GET/POST /api/v1/companies`, `GET/PATCH/DELETE /api/v1/companies/:guid`: CRUD protegido por JWT con `isPlatformAdmin=true`; campos `name`, `shortName`, `code`, `timezone`, `locale`, `status` y `configJson`.
+- `POST /api/v1/companies/:guid/database`: crea el schema vacío derivado del GUID y guarda `databaseName`; no acepta el nombre de base en el request ni elimina schemas.
 - `GET /docs` y `GET /docs/json`: Swagger UI y documento OpenAPI.
 
 El login no crea usuarios. Los procedimientos de `Database/02_users_auth_procedures.sql` permiten CRUD a nivel de base de datos; no deben exponerse directamente hasta definir autorización de administración.
@@ -406,7 +407,7 @@ mysql -u root -p < Database/01_schema.sql
 mysql -u root -p kindmetricscte < Database/02_users_auth_procedures.sql
 ```
 
-`Database/01_schema.sql` es para una instalación nueva. No ejecutar sobre una base existente sin revisar migraciones, dependencias y datos. El SQL no se aplicó desde este entorno: no hay conexión SQL disponible a `kindmetricscte`.
+`Database/01_schema.sql` es para una instalación nueva. Para una existente, aplicar en orden `Database/03_company_short_name_and_crud.sql` y `Database/04_company_database.sql`. La migración `1.2.0` ya está aplicada en el entorno de desarrollo; QA y producción requieren su propia aplicación controlada.
 
 Configurar `JWT_SECRET` como valor aleatorio de 32 bytes o más en el archivo de entorno activo. Para generar uno localmente con Node:
 
@@ -414,7 +415,7 @@ Configurar `JWT_SECRET` como valor aleatorio de 32 bytes o más en el archivo de
 node -e "console.log(require('node:crypto').randomBytes(48).toString('base64'))"
 ```
 
-Crear el primer usuario mediante un proceso administrativo controlado que almacene un hash bcrypt en `password_hash`; no guardar contraseñas en texto plano ni registrar el hash.
+Crear el primer usuario mediante un proceso administrativo controlado que almacene un hash Argon2id en `password_hash`; no guardar contraseñas en texto plano ni registrar el hash.
 
 No crear endpoints funcionales simulados para aparentar que un módulo está terminado.
 

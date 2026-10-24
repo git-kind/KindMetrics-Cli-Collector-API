@@ -10,6 +10,7 @@ import { DatabaseModule } from './infrastructure/database/database.module';
 import { HealthModule } from './modules/health/health.module';
 import { QueriesModule } from './modules/queries/queries.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { CompaniesModule } from './modules/companies/companies.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { AuthModule } from './modules/auth/auth.module';
     HealthModule,
     QueriesModule,
     AuthModule,
+    CompaniesModule,
   ],
   providers: [AppLogger],
 })

@@ -13,5 +13,6 @@ import { AuthService } from '../../Services/Auth/auth.service';
     MySqlAuthRepository,
     { provide: AUTH_REPOSITORY, useExisting: MySqlAuthRepository },
   ],
+  exports: [JwtModule],
 })
 export class AuthModule {}

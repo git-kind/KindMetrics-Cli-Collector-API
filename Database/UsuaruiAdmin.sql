@@ -14,3 +14,7 @@ TO 'kindmetricscte'@'%';
 
 -- 4. Verificar permisos
 SHOW GRANTS FOR 'kindmetricscte'@'%';
+
+
+-- admincte@kindtech.com
+-- AdminCte
