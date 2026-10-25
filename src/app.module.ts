@@ -11,6 +11,7 @@ import { HealthModule } from './modules/health/health.module';
 import { QueriesModule } from './modules/queries/queries.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CompaniesModule } from './modules/companies/companies.module';
+import { ExtractionMethodsModule } from './modules/extraction-methods/extraction-methods.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { CompaniesModule } from './modules/companies/companies.module';
     QueriesModule,
     AuthModule,
     CompaniesModule,
+    ExtractionMethodsModule,
   ],
   providers: [AppLogger],
 })

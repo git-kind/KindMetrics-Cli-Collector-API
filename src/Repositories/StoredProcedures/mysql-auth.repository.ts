@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { MySqlStoredProcedureExecutor } from '../../infrastructure/database/mysql-stored-procedure.executor';
+import { LocalStoredProcedureRepository } from './local-stored-procedure.repository';
 import {
   AuthRepository,
   UserCredentialRecord,
@@ -7,7 +7,7 @@ import {
 
 @Injectable()
 export class MySqlAuthRepository implements AuthRepository {
-  constructor(private readonly procedures: MySqlStoredProcedureExecutor) {}
+  constructor(private readonly procedures: LocalStoredProcedureRepository) {}
 
   async findUserByEmail(email: string): Promise<UserCredentialRecord | null> {
     const rows = await this.procedures.call<UserCredentialRecord[]>(

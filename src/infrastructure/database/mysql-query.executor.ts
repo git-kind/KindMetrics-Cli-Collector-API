@@ -1,16 +1,25 @@
 import { Injectable } from '@nestjs/common';
 import { DatabaseQueryParameter } from './database-connection';
-import { MysqlDatabaseConnection } from './mysql-database.connection';
+import { MysqlExecutorConnection } from './mysql-pool.types';
+import { LocalConnectionManager } from './local-connection.manager';
 
 @Injectable()
 export class MySqlQueryExecutor {
-  constructor(private readonly connection: MysqlDatabaseConnection) {}
+  constructor(private readonly connection: LocalConnectionManager) {}
 
   async execute<TResult>(
     sql: string,
     parameters: DatabaseQueryParameter[] = [],
   ): Promise<TResult> {
-    const [result] = await this.connection.getPool().execute(sql, parameters);
+    return this.executeOn<TResult>(this.connection.getPool(), sql, parameters);
+  }
+
+  async executeOn<TResult>(
+    connection: MysqlExecutorConnection,
+    sql: string,
+    parameters: DatabaseQueryParameter[] = [],
+  ): Promise<TResult> {
+    const [result] = await connection.execute(sql, parameters);
     return result as TResult;
   }
 }

@@ -1,10 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { HealthRepository } from '../Contracts/health.repository';
-import { MySqlQueryExecutor } from '../../infrastructure/database/mysql-query.executor';
+import { LocalQueryRepository } from './local-query.repository';
 
 @Injectable()
 export class MySqlHealthRepository implements HealthRepository {
-  constructor(private readonly queryExecutor: MySqlQueryExecutor) {}
+  constructor(private readonly queryExecutor: LocalQueryRepository) {}
 
   async canConnectToDatabase(): Promise<boolean> {
     const rows = await this.queryExecutor.execute<Array<{ connection: number }>>(

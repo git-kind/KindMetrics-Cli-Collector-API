@@ -35,9 +35,6 @@ export class CreateCompanyDto {
   @ApiProperty({ maxLength: 60 })
   code!: string;
 
-  @ApiPropertyOptional({ nullable: true, example: 'km_company_abc123' })
-  databaseName?: string | null;
-
   @ApiProperty({ default: 'UTC' })
   timezone!: string;
 

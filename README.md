@@ -2,7 +2,7 @@
 
 > **Proyecto:** KindMetrics
 > **Componente:** API local del Collector (también denominada informalmente `KindMetricsCte-API`)
-> **Estado auditado:** 23-10-2026. NestJS con Fastify; implementados login, health, CRUD de Companies, creación explícita de base por Company protegida para administradores y `POST /api/v1/queries/execute` (501 intencionalmente). El CRUD de usuarios está definido en Stored Procedures; no existe aún una API HTTP CRUD para usuarios.
+> **Estado auditado:** 24-10-2026. NestJS con Fastify; implementados login, health, CRUD de Companies, creación explícita de schema por Company, CRUD de Extraction Methods con CompanyContext y `POST /api/v1/queries/execute` (501 intencionalmente). El aprovisionamiento completo de schemas Company y la autorización CUSTOMER por identidad de instalación siguen pendientes.
 > **Fuente:** decisiones globales en `docs/`; el estado de implementación se contrasta con el código de este repositorio.
 
 ## 1. Objetivo
@@ -15,9 +15,9 @@ El proyecto debe mantener convenciones arquitectónicas compatibles con `KindMet
 
 ## 2. Alcance y estado
 
-La implementación actual contiene NestJS, TypeScript, Fastify, Swagger, validación HTTP, manejo centralizado de errores, logging, health check, login local, CRUD de Companies y un pool MySQL. `GET /health` consulta `SELECT 1` mediante Controller → Service → contrato de Repository → implementación MySQL → Query Executor. El login consulta por Stored Procedure, verifica Argon2 y emite JWT. El CRUD de Companies y la creación explícita de su base usan Stored Procedures y requieren JWT de plataforma administradora. La operación crea solo el schema vacío `km_company_<guid-sin-guiones>`; no crea tablas ni copia datos. `POST /api/v1/queries/execute` valida su DTO con Zod y responde 501 sin ejecutar SQL.
+La implementación actual contiene NestJS, TypeScript, Fastify, Swagger, validación HTTP, manejo centralizado de errores, logging, health check, login local, CRUD de Companies y Extraction Methods. La persistencia local comparte un único pool `kindmetricscte`; las bases Company usan pools separados administrados por un manager con máximo y expiración idle. `GET /health` consulta `SELECT 1` por el repository local de Queries. Auth y Company usan repositories locales de Stored Procedures. `POST /api/v1/queries/execute` valida su DTO con Zod y responde 501 sin ejecutar SQL.
 
-El guard actual valida el JWT y el claim `isPlatformAdmin` para las rutas de Company; aún no valida revocación/estado del usuario en cada request ni implementa CompanyContext, sincronización o conexión con Collector-BS. El SQL define procedimientos CRUD de usuarios, pero todavía no hay controller/service HTTP asociados. Los módulos funcionales restantes se incorporarán gradualmente.
+Companies requiere JWT con `isPlatformAdmin`. Extraction Methods requiere JWT y CompanyContext: el resolver verifica acceso con las tablas existentes `users`, `user_roles` y `roles.company_id`, y obtiene `company.database_name`. El modelo no contiene configuración de host/credenciales por Company; todas las bases Company usan el servidor configurado en `MYSQL_HOST`/`MYSQL_PORT`/`MYSQL_USER`/`MYSQL_PASSWORD`. No se valida revocación de token contra DB en cada request. La identidad de instalación CUSTOMER no está cargada desde `kindCli.cfg`, por lo que todavía no se puede imponer su vínculo de Company. El SQL define procedimientos CRUD de usuarios, pero no hay controller/service HTTP asociados. Sincronización y conexión con Collector-BS también siguen pendientes.
 
 ## 3. Principios obligatorios
 
@@ -187,13 +187,13 @@ Los nombres de dominio listados son ejemplos de módulos futuros; no implican qu
 
 ```text
 src/
-├── Controllers/{Auth,Company,Health,Queries}/
-├── Models/{Auth,Common,Company,Queries}/
-├── Services/{Auth,Company,Health,Queries}/
+├── Controllers/{Auth,Company,ExtractionMethods,Health,Queries}/
+├── Models/{Auth,Common,Company,ExtractionMethods,Queries}/
+├── Services/{Auth,Company,ExtractionMethods,Health,Queries}/
 ├── Repositories/{Contracts,Queries,StoredProcedures}/
-├── modules/{auth,companies,health,queries}/  # composición e inyección NestJS
-├── infrastructure/database/       # pool y executors MySQL
-├── common/{filters,interceptors,logging}/
+├── modules/{auth,companies,extraction-methods,health,queries}/
+├── infrastructure/database/       # managers, repositorios de acceso y executors
+├── common/{company-context,filters,guards,interceptors,logging}/
 ├── config/
 ├── app.module.ts
 └── main.ts
@@ -229,17 +229,25 @@ La separación de bases es lógica y puede desplegarse en distintas instancias s
 
 ### 7.2 Infraestructura de acceso
 
-- Centralizar pool y conexiones MySQL.
+- `LocalConnectionManager` mantiene una única instancia del pool local, compartida por todos los Repositories locales.
+- `CompanyConnectionManager` administra pools Company reutilizables, limita el máximo global y cierra pools inactivos; el cierre de aplicación libera los pools restantes.
 - La base predeterminada del Collector es `kindmetricscte`; `MYSQL_DATABASE` se configura por entorno y no se cambia al arrancar.
-- `MySqlQueryExecutor`: SQL parametrizado, conexión y resultados estructurados.
-- `MySqlStoredProcedureExecutor`: ejecución de procedimientos almacenados, parámetros y resultados.
+- `LocalQueryRepository` ejecuta SQL parametrizado; `LocalStoredProcedureRepository` ejecuta exclusivamente Stored Procedures locales. Ambos usan el mismo `LocalConnectionManager`.
+- `MySqlQueryExecutor` y `MySqlStoredProcedureExecutor` solo ejecutan la operación solicitada; pueden usar pool local o conexión adquirida del pool Company. No contienen lógica de dominio.
+- `CompanyDatabaseResolver` consume el contrato `CompanyContextRepository`, valida Company, membresía y mapping, y construye un `CompanyContext` tipado. `CompanyDatabaseRepository` ejecuta SQL o Stored Procedures parametrizados con la conexión Company liberada al terminar.
 - La autenticación usa `sp_users_get_by_email`; el hash solo se selecciona en este procedimiento y nunca se incluye en el DTO de respuesta.
 - Mantener los ejecutores separados; no fusionarlos en uno genérico.
-- Implementar transacciones atómicas cuando el caso de uso lo exija (`BEGIN`, `COMMIT`, `ROLLBACK`).
+- `LocalConnectionManager`, `LocalQueryRepository` y `LocalStoredProcedureRepository` proporcionan callbacks transaccionales con `BEGIN`, `COMMIT`, `ROLLBACK` y release garantizado. El manager Company ofrece el mismo patrón para operaciones futuras.
 - No crear ni alterar tablas automáticamente durante el arranque sin un proceso de migración aprobado.
 - La conexión física se resuelve en el backend; ningún cliente debe decidir arbitrariamente el nombre de la base de datos.
 
-El pool compartido está en `MysqlDatabaseConnection`; Query y Stored Procedure usan executors diferentes. `Database/03_company_short_name_and_crud.sql` agrega `company.short_name` sin descartar datos. `Database/04_company_database.sql` agrega `company.database_name` y `sp_companies_create_database` (migración `1.2.0`). El nombre se deriva en el servidor del GUID validado. El DEFINER del procedimiento necesita privilegio `CREATE`; la operación solo crea un schema vacío y no instala tablas.
+`DatabaseModule` es global y registra una sola instancia de cada manager y executor; no se vuelven a declarar en módulos funcionales. `Database/03_company_short_name_and_crud.sql` agrega `company.short_name`; `Database/04_company_database.sql` agrega `company.database_name` y `sp_companies_create_database` (versión `1.2.0`). El nombre se deriva en servidor del GUID validado. El mapping se almacena en `kindmetricscte.company.database_name`; el schema actual no tiene host, puerto ni credenciales por Company. `MYSQL_COMPANY_POOL_MAX` (20), `MYSQL_COMPANY_POOL_IDLE_TIMEOUT_MS` (300000) y `MYSQL_COMPANY_CONNECTION_LIMIT` (5) configuran los pools dinámicos. La creación de schema requiere privilegio administrativo y solo crea un schema vacío.
+
+### 7.2.1 CompanyContext y aislamiento
+
+Las rutas de Extraction Methods reciben `X-Company-Id` como GUID lógico y exigen JWT. `JwtAuthGuard` valida el token y adjunta el `sub`; `CompanyContextGuard` consulta el contrato local de resolución y exige que el usuario activo tenga al menos un rol asignado a la Company mediante `users → user_roles → roles.company_id`. El repository de acceso Company recibe ese GUID, busca `company.database_name`, verifica que sea exactamente `km_company_<guid-sin-guiones>`, obtiene/reutiliza el pool y ejecuta el Stored Procedure. Ninguna capa recibe el nombre físico desde HTTP.
+
+Esta autorización corresponde al esquema existente del Collector API; no implementa el modelo conceptual `UserCompanyAccess` de la plataforma central. Para instalación CUSTOMER, falta leer y validar la Company fija asociada a la instalación. En ese modo, el header deberá compararse con esa asociación y nunca permitir selección. El API no recibe ni soporta actualmente hosts o credenciales distintos para cada Company; se requiere una decisión y migración de configuración antes de habilitarlos.
 
 ### 7.3 Repositorios
 
@@ -280,9 +288,9 @@ La autorización avanzada por recurso/acción/alcance, capacidades y permisos po
 
 ## 9. CompanyContext y límites de tenant
 
-La documentación histórica contempla `Authorization: Bearer <JWT>` y `X-Company-Id`; la plataforma central usa `X-Company-Guid` en ciertos endpoints. El código actual autentica con JWT y protege el CRUD de Companies para administradores de plataforma, pero todavía no implementa CompanyContext ni interpreta esos headers como contexto. **No asumir que el Collector local debe permitir selección arbitraria de Company.**
+Extraction Methods implementa `Authorization: Bearer <JWT>` y `X-Company-Id`, con validación del GUID, usuario activo, existencia de un rol asignado en la misma Company y mapping físico obtenido desde `kindmetricscte.company.database_name`. El CRUD administrativo de Companies sigue protegido por `isPlatformAdmin`. La plataforma central también documenta `X-Company-Guid`; no se cambia el contrato actual del Collector API.
 
-Para una instalación local asociada a una Company:
+Para una instalación local asociada a una Company, el comportamiento final previsto es:
 
 1. Autenticar al usuario o servicio.
 2. Resolver la Company configurada para la instalación desde datos confiables del backend.
@@ -290,7 +298,7 @@ Para una instalación local asociada a una Company:
 4. Construir el contexto efectivo para la operación.
 5. Rechazar cualquier encabezado de Company que intente sustituir una asociación no autorizada.
 
-**Decisión pendiente:** no se renombró ningún encabezado. El repositorio KindMetricsAPI no está disponible en este workspace y no se encontró consumidor de este API aquí; antes de implementar CompanyContext debe definirse si el Collector local resolverá su Company desde la instalación o si aceptará un header validado.
+**Pendiente:** `installation.config.ts` solo configura una ruta de archivo y no lee la instalación ni una Company fija. Por eso aún no se puede comprobar la vinculación CUSTOMER; cuando se implemente esa resolución, deberá rechazarse un header distinto de la Company de instalación. La membresía usada aquí está basada en el esquema local existente y no crea la tabla conceptual `UserCompanyAccess`.
 
 El frontend no puede seleccionar la base física por nombre.
 
@@ -394,6 +402,7 @@ Rutas comprobadas en el código:
 - `POST /api/v1/queries/execute`: valida `query`, `datasourceGuid` y parámetros con Zod y devuelve 501 intencionalmente; no ejecuta SQL.
 - `GET/POST /api/v1/companies`, `GET/PATCH/DELETE /api/v1/companies/:guid`: CRUD protegido por JWT con `isPlatformAdmin=true`; campos `name`, `shortName`, `code`, `timezone`, `locale`, `status` y `configJson`.
 - `POST /api/v1/companies/:guid/database`: crea el schema vacío derivado del GUID y guarda `databaseName`; no acepta el nombre de base en el request ni elimina schemas.
+- `GET/POST /api/v1/extraction-methods`, `GET/PATCH/DELETE /api/v1/extraction-methods/:id`: CRUD por Company con `X-Company-Id`, JWT y CompanyContext. Las lecturas no devuelven credenciales; `hasCredentials` informa si existen.
 - `GET /docs` y `GET /docs/json`: Swagger UI y documento OpenAPI.
 
 El login no crea usuarios. Los procedimientos de `Database/02_users_auth_procedures.sql` permiten CRUD a nivel de base de datos; no deben exponerse directamente hasta definir autorización de administración.
@@ -408,6 +417,8 @@ mysql -u root -p kindmetricscte < Database/02_users_auth_procedures.sql
 ```
 
 `Database/01_schema.sql` es para una instalación nueva. Para una existente, aplicar en orden `Database/03_company_short_name_and_crud.sql` y `Database/04_company_database.sql`. La migración `1.2.0` ya está aplicada en el entorno de desarrollo; QA y producción requieren su propia aplicación controlada.
+
+`Database/05_extraction_methods.sql` es una migración manual dirigida a la base Company indicada en el archivo (`km_company_1ab38c98cf5f11f1b541a6d1e9ab77e1`). No se ejecuta durante las peticiones ni el arranque. `sp_companies_create_database` solo crea el schema vacío: todavía no existe un aprovisionador que instale tablas, índices y procedimientos y valide la versión antes de activar Company. Aplicar migraciones con una cuenta administrativa controlada; no ejecutarlas automáticamente contra datos reales.
 
 Configurar `JWT_SECRET` como valor aleatorio de 32 bytes o más en el archivo de entorno activo. Para generar uno localmente con Node:
 

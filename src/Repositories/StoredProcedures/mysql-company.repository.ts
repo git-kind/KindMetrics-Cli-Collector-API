@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { MySqlStoredProcedureExecutor } from '../../infrastructure/database/mysql-stored-procedure.executor';
+import { LocalStoredProcedureRepository } from './local-stored-procedure.repository';
 import {
   CompanyRecord,
   CompanyDatabaseCreation,
@@ -10,7 +10,7 @@ import {
 
 @Injectable()
 export class MySqlCompanyRepository implements CompanyRepository {
-  constructor(private readonly procedures: MySqlStoredProcedureExecutor) {}
+  constructor(private readonly procedures: LocalStoredProcedureRepository) {}
 
   list(): Promise<CompanyRecord[]> {
     return this.procedures.call('sp_companies_list');

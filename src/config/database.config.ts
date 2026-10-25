@@ -9,4 +9,11 @@ export default registerAs('database', () => ({
   connectionLimit: Number(process.env.MYSQL_CONNECTION_LIMIT ?? 10),
   connectTimeout: Number(process.env.MYSQL_CONNECT_TIMEOUT ?? 5000),
   queueLimit: Number(process.env.MYSQL_QUEUE_LIMIT ?? 0),
+  companyPoolMax: Number(process.env.MYSQL_COMPANY_POOL_MAX ?? 20),
+  companyPoolIdleTimeoutMs: Number(
+    process.env.MYSQL_COMPANY_POOL_IDLE_TIMEOUT_MS ?? 300000,
+  ),
+  companyConnectionLimit: Number(
+    process.env.MYSQL_COMPANY_CONNECTION_LIMIT ?? 5,
+  ),
 }));
