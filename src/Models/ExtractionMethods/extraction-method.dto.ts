@@ -3,130 +3,158 @@ import { z } from 'zod';
 
 const jsonObject = z.record(z.string(), z.unknown());
 
-export const CreateExtractionMethodSchema = z.object({
+export const ExtractionMethodParameterSchema = z.object({
+  parameterKey: z.string().trim().min(1).max(100),
+  dataType: z.string().trim().min(1).max(30),
+  defaultValue: z.string().nullable().optional(),
+  isRequired: z.boolean().default(false),
+  isSecret: z.boolean().default(false),
+  description: z.string().max(500).nullable().optional(),
+});
+
+export const ExtractionMethodFieldSchema = z.object({
+  fieldKey: z.string().trim().min(1).max(100),
+  sourcePath: z.string().trim().min(1).max(500),
+  dataType: z.string().trim().min(1).max(30),
+  unit: z.string().max(30).nullable().optional(),
+  description: z.string().max(500).nullable().optional(),
+});
+
+export const ExtractionMethodRequestSchema = z.object({
+  code: z.string().trim().min(1).max(100),
   name: z.string().trim().min(1).max(150),
-  type: z.string().trim().min(1).max(60),
-  target: z.string().trim().max(255).nullable().optional(),
-  connection: jsonObject,
-  credentials: jsonObject.nullable().optional(),
-  discovery: jsonObject.nullable().optional(),
-  availableData: z.array(z.unknown()).nullable().optional(),
-  capabilities: z.array(z.string().trim().min(1).max(100)).nullable().optional(),
-  status: z.enum(['ACTIVE', 'INACTIVE']).default('ACTIVE'),
+  requestType: z.string().trim().min(1).max(30),
+  requestConfig: jsonObject,
+  isActive: z.boolean().default(true),
+  fields: z.array(ExtractionMethodFieldSchema).default([]),
+});
+
+export const EquipmentExtractionMethodSchema = z.object({
+  equipmentId: z.number().int().positive(),
+  name: z.string().trim().min(1).max(150),
+  connectionConfig: jsonObject.nullable().optional(),
+  credentialRef: z.string().max(255).nullable().optional(),
+  isActive: z.boolean().default(true),
+});
+
+export const CreateExtractionMethodSchema = z.object({
+  code: z.string().trim().min(1).max(100),
+  name: z.string().trim().min(1).max(150),
+  description: z.string().nullable().optional(),
+  protocol: z.string().trim().min(1).max(30),
+  configurationSchema: jsonObject.nullable().optional(),
+  isActive: z.boolean().default(true),
+  parameters: z.array(ExtractionMethodParameterSchema).default([]),
+  requests: z.array(ExtractionMethodRequestSchema).default([]),
+  equipment: z.array(EquipmentExtractionMethodSchema).default([]),
 });
 
 export const UpdateExtractionMethodSchema = z
   .object({
+    code: z.string().trim().min(1).max(100).optional(),
     name: z.string().trim().min(1).max(150).optional(),
-    type: z.string().trim().min(1).max(60).optional(),
-    target: z.string().trim().max(255).nullable().optional(),
-    connection: jsonObject.optional(),
-    credentials: jsonObject.nullable().optional(),
-    discovery: jsonObject.nullable().optional(),
-    availableData: z.array(z.unknown()).nullable().optional(),
-    capabilities: z.array(z.string().trim().min(1).max(100)).nullable().optional(),
-    status: z.enum(['ACTIVE', 'INACTIVE']).optional(),
+    description: z.string().nullable().optional(),
+    protocol: z.string().trim().min(1).max(30).optional(),
+    configurationSchema: jsonObject.nullable().optional(),
+    isActive: z.boolean().optional(),
+    parameters: z.array(ExtractionMethodParameterSchema).optional(),
+    requests: z.array(ExtractionMethodRequestSchema).optional(),
+    equipment: z.array(EquipmentExtractionMethodSchema).optional(),
   })
   .refine((value) => Object.keys(value).length > 0);
 
 export class CreateExtractionMethodDto {
+  @ApiProperty({ maxLength: 100 })
+  code!: string;
+
   @ApiProperty({ maxLength: 150 })
   name!: string;
 
-  @ApiProperty({ maxLength: 60, example: 'SNMP' })
-  type!: string;
-
   @ApiPropertyOptional({ nullable: true })
-  target?: string | null;
+  description?: string | null;
 
-  @ApiProperty({ type: 'object', additionalProperties: true })
-  connection!: Record<string, unknown>;
-
-  @ApiPropertyOptional({
-    type: 'object',
-    nullable: true,
-    writeOnly: true,
-    additionalProperties: true,
-  })
-  credentials?: Record<string, unknown> | null;
+  @ApiProperty({ maxLength: 30, example: 'SNMP' })
+  protocol!: string;
 
   @ApiPropertyOptional({ type: 'object', nullable: true, additionalProperties: true })
-  discovery?: Record<string, unknown> | null;
+  configurationSchema?: Record<string, unknown> | null;
 
-  @ApiPropertyOptional({ type: [Object], nullable: true })
-  availableData?: unknown[] | null;
+  @ApiPropertyOptional({ default: true })
+  isActive?: boolean;
 
-  @ApiPropertyOptional({ type: [String], nullable: true })
-  capabilities?: string[] | null;
+  @ApiProperty({ type: [Object] })
+  parameters!: z.infer<typeof ExtractionMethodParameterSchema>[];
 
-  @ApiPropertyOptional({ enum: ['ACTIVE', 'INACTIVE'], default: 'ACTIVE' })
-  status?: 'ACTIVE' | 'INACTIVE';
+  @ApiProperty({ type: [Object] })
+  requests!: z.infer<typeof ExtractionMethodRequestSchema>[];
+
+  @ApiProperty({ type: [Object] })
+  equipment!: z.infer<typeof EquipmentExtractionMethodSchema>[];
 }
 
 export class UpdateExtractionMethodDto {
+  @ApiPropertyOptional({ maxLength: 100 })
+  code?: string;
+
   @ApiPropertyOptional({ maxLength: 150 })
   name?: string;
 
-  @ApiPropertyOptional({ maxLength: 60 })
-  type?: string;
-
   @ApiPropertyOptional({ nullable: true })
-  target?: string | null;
+  description?: string | null;
 
-  @ApiPropertyOptional({ type: 'object', additionalProperties: true })
-  connection?: Record<string, unknown>;
-
-  @ApiPropertyOptional({
-    type: 'object',
-    nullable: true,
-    writeOnly: true,
-    additionalProperties: true,
-  })
-  credentials?: Record<string, unknown> | null;
+  @ApiPropertyOptional({ maxLength: 30 })
+  protocol?: string;
 
   @ApiPropertyOptional({ type: 'object', nullable: true, additionalProperties: true })
-  discovery?: Record<string, unknown> | null;
+  configurationSchema?: Record<string, unknown> | null;
 
-  @ApiPropertyOptional({ type: [Object], nullable: true })
-  availableData?: unknown[] | null;
+  @ApiPropertyOptional()
+  isActive?: boolean;
 
-  @ApiPropertyOptional({ type: [String], nullable: true })
-  capabilities?: string[] | null;
+  @ApiPropertyOptional({ type: [Object] })
+  parameters?: z.infer<typeof ExtractionMethodParameterSchema>[];
 
-  @ApiPropertyOptional({ enum: ['ACTIVE', 'INACTIVE'] })
-  status?: 'ACTIVE' | 'INACTIVE';
+  @ApiPropertyOptional({ type: [Object] })
+  requests?: z.infer<typeof ExtractionMethodRequestSchema>[];
+
+  @ApiPropertyOptional({ type: [Object] })
+  equipment?: z.infer<typeof EquipmentExtractionMethodSchema>[];
 }
 
 export class ExtractionMethodResponseDto {
-  @ApiProperty({ format: 'uuid' })
-  id!: string;
+  @ApiProperty({ example: 42 })
+  id!: number;
+
+  @ApiProperty()
+  code!: string;
 
   @ApiProperty()
   name!: string;
 
   @ApiProperty()
-  type!: string;
+  protocol!: string;
 
   @ApiPropertyOptional({ nullable: true })
-  target!: string | null;
-
-  @ApiProperty({ type: 'object', additionalProperties: true })
-  connection!: Record<string, unknown>;
-
-  @ApiProperty({ description: 'Indica si existen credenciales guardadas.' })
-  hasCredentials!: boolean;
+  description!: string | null;
 
   @ApiPropertyOptional({ type: 'object', nullable: true, additionalProperties: true })
-  discovery!: Record<string, unknown> | null;
+  configurationSchema!: Record<string, unknown> | null;
 
-  @ApiPropertyOptional({ type: [Object], nullable: true })
-  availableData!: unknown[] | null;
+  @ApiProperty()
+  isActive!: boolean;
 
-  @ApiPropertyOptional({ type: [String], nullable: true })
-  capabilities!: string[] | null;
+  @ApiProperty({ type: [Object] })
+  parameters!: unknown[];
 
-  @ApiProperty({ enum: ['ACTIVE', 'INACTIVE'] })
-  status!: 'ACTIVE' | 'INACTIVE';
+  @ApiProperty({ type: [Object] })
+  requests!: unknown[];
+
+  @ApiProperty({ type: [Object] })
+  equipment!: unknown[];
+
+  @ApiProperty({ type: [Object] })
+  versions!: unknown[];
+
 
   @ApiProperty()
   createdAt!: Date;

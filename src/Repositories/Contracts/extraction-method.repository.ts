@@ -14,24 +14,25 @@ export type UpdateExtractionMethodInput = z.infer<
 >;
 
 export interface ExtractionMethodRecord {
-  id: string;
+  id: number;
+  code: string;
   name: string;
-  type: string;
-  target: string | null;
-  connection: Record<string, unknown>;
-  hasCredentials: boolean | number;
-  discovery: Record<string, unknown> | null;
-  availableData: unknown[] | null;
-  capabilities: string[] | null;
-  status: 'ACTIVE' | 'INACTIVE';
+  description: string | null;
+  protocol: string;
+  configurationSchema: Record<string, unknown> | null;
+  isActive: boolean | number;
+  parameters: Array<Record<string, unknown>>;
+  requests: Array<Record<string, unknown>>;
+  equipment: Array<Record<string, unknown>>;
+  versions: Array<Record<string, unknown>>;
   createdAt: Date;
   updatedAt: Date;
 }
 
 export interface ExtractionMethodRepository {
   list(companyGuid: string): Promise<ExtractionMethodRecord[]>;
-  findById(companyGuid: string, id: string): Promise<ExtractionMethodRecord | null>;
+  findById(companyGuid: string, id: number): Promise<ExtractionMethodRecord | null>;
   create(companyGuid: string, input: CreateExtractionMethodInput): Promise<ExtractionMethodRecord>;
-  update(companyGuid: string, id: string, input: UpdateExtractionMethodInput): Promise<ExtractionMethodRecord | null>;
-  delete(companyGuid: string, id: string): Promise<boolean>;
+  update(companyGuid: string, id: number, input: UpdateExtractionMethodInput): Promise<ExtractionMethodRecord | null>;
+  delete(companyGuid: string, id: number): Promise<boolean>;
 }

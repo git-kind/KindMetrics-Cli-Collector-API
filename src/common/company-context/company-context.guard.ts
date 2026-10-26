@@ -18,15 +18,19 @@ export class CompanyContextGuard implements CanActivate {
     const request = context
       .switchToHttp()
       .getRequest<FastifyRequest & CompanyContextRequest>();
-    const companyHeader = request.headers['x-company-id'];
-    const companyGuid = z.string().uuid().safeParse(companyHeader);
-    if (!companyGuid.success) {
-      throw new BadRequestException('El header X-Company-Id debe contener un GUID válido.');
+    const companyHeader = request.headers['x-company-code'];
+    const companyCode = z.string().trim().min(1).max(60).safeParse(companyHeader);
+    if (!companyCode.success) {
+      throw new BadRequestException('El header X-Company-Code es obligatorio.');
     }
 
     const userGuid = request.user?.sub;
     if (!userGuid) throw new UnauthorizedException('No se pudo identificar al usuario.');
-    request.companyContext = await this.resolver.resolve(companyGuid.data, userGuid);
+    request.companyContext = await this.resolver.resolve(
+      companyCode.data,
+      userGuid,
+      request.user?.isPlatformAdmin === true,
+    );
     return true;
   }
 }

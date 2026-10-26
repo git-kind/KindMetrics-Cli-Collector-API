@@ -12,16 +12,19 @@ export class MySqlExtractionMethodRepository implements ExtractionMethodReposito
   constructor(private readonly companyDatabase: CompanyDatabaseRepository) {}
 
   list(companyGuid: string): Promise<ExtractionMethodRecord[]> {
-    return this.call(companyGuid, 'sp_extraction_methods_list');
+    return this.call<ExtractionMethodRecord[]>(
+      companyGuid,
+      'sp_extraction_methods_list',
+    ).then((methods) => methods.map((method) => this.parseJsonFields(method)));
   }
 
-  async findById(companyGuid: string, id: string): Promise<ExtractionMethodRecord | null> {
+  async findById(companyGuid: string, id: number): Promise<ExtractionMethodRecord | null> {
     const rows = await this.call<ExtractionMethodRecord[]>(
       companyGuid,
       'sp_extraction_methods_get',
       [id],
     );
-    return rows[0] ?? null;
+    return rows[0] ? this.parseJsonFields(rows[0]) : null;
   }
 
   async create(
@@ -32,65 +35,64 @@ export class MySqlExtractionMethodRepository implements ExtractionMethodReposito
       companyGuid,
       'sp_extraction_methods_create',
       [
+        input.code,
         input.name,
-        input.type,
-        input.target ?? null,
-        JSON.stringify(input.connection),
-        input.credentials == null ? null : JSON.stringify(input.credentials),
-        input.discovery == null ? null : JSON.stringify(input.discovery),
-        input.availableData == null ? null : JSON.stringify(input.availableData),
-        input.capabilities == null ? null : JSON.stringify(input.capabilities),
-        input.status,
+        input.description ?? null,
+        input.protocol,
+        input.configurationSchema == null
+          ? null
+          : JSON.stringify(input.configurationSchema),
+        input.isActive,
+        JSON.stringify(input.parameters),
+        JSON.stringify(input.requests),
+        JSON.stringify(input.equipment),
       ],
     );
-    return rows[0];
+    return this.parseJsonFields(rows[0]);
   }
 
   async update(
     companyGuid: string,
-    id: string,
+    id: number,
     input: UpdateExtractionMethodInput,
   ): Promise<ExtractionMethodRecord | null> {
-    const fields = [
-      ['name', input.name],
-      ['type', input.type],
-      ['target', input.target],
-      ['connection', input.connection],
-      ['credentials', input.credentials],
-      ['discovery', input.discovery],
-      ['availableData', input.availableData],
-      ['capabilities', input.capabilities],
-      ['status', input.status],
-    ] as const;
-    const values: unknown[] = [id];
-
-    for (const [field, value] of fields) {
-      const isJson = [
-        'connection',
-        'credentials',
-        'discovery',
-        'availableData',
-        'capabilities',
-      ].includes(field);
-      values.push(
-        value === undefined
-          ? null
-          : isJson && value !== null
-            ? JSON.stringify(value)
-            : value,
-        value !== undefined,
-      );
-    }
+    const values = [
+      id,
+      input.code ?? null,
+      input.code !== undefined,
+      input.name ?? null,
+      input.name !== undefined,
+      input.description ?? null,
+      input.description !== undefined,
+      input.protocol ?? null,
+      input.protocol !== undefined,
+      input.configurationSchema == null
+        ? null
+        : JSON.stringify(input.configurationSchema),
+      input.configurationSchema !== undefined,
+      input.isActive ?? null,
+      input.isActive !== undefined,
+      input.parameters === undefined ? null : JSON.stringify(input.parameters),
+      input.parameters !== undefined,
+      input.requests === undefined ? null : JSON.stringify(input.requests),
+      input.requests !== undefined,
+      input.equipment === undefined ? null : JSON.stringify(input.equipment),
+      input.equipment !== undefined,
+    ];
 
     const rows = await this.call<ExtractionMethodRecord[]>(
       companyGuid,
       'sp_extraction_methods_update',
       values,
     );
-    return rows[0] ?? null;
+    const method = rows[0] as
+      | (ExtractionMethodRecord & { found?: number })
+      | undefined;
+    if (!method || method.found === 0) return null;
+    return this.parseJsonFields(method);
   }
 
-  async delete(companyGuid: string, id: string): Promise<boolean> {
+  async delete(companyGuid: string, id: number): Promise<boolean> {
     const rows = await this.call<Array<{ affected: number }>>(
       companyGuid,
       'sp_extraction_methods_delete',
@@ -109,5 +111,25 @@ export class MySqlExtractionMethodRepository implements ExtractionMethodReposito
       procedureName,
       parameters as never[],
     );
+  }
+
+  private parseJsonFields(method: ExtractionMethodRecord): ExtractionMethodRecord {
+    return {
+      ...method,
+      configurationSchema: this.parseJson(method.configurationSchema),
+      parameters: this.parseJson(method.parameters),
+      requests: this.parseJson(method.requests),
+      equipment: this.parseJson(method.equipment),
+      versions: this.parseJson(method.versions),
+    };
+  }
+
+  private parseJson<T>(value: T | string): T {
+    if (typeof value !== 'string') return value;
+    try {
+      return JSON.parse(value) as T;
+    } catch {
+      return value as T;
+    }
   }
 }

@@ -20,7 +20,7 @@ export class ExtractionMethodService {
     return methods.map((method) => this.withoutSecrets(method));
   }
 
-  async get(company: CompanyContext, id: string) {
+  async get(company: CompanyContext, id: number) {
     const method = await this.methods.findById(company.companyGuid, id);
     if (!method) throw new NotFoundException('Método de extracción no encontrado.');
     return this.withoutSecrets(method);
@@ -32,20 +32,32 @@ export class ExtractionMethodService {
     );
   }
 
-  async update(company: CompanyContext, id: string, input: UpdateExtractionMethodInput) {
+  async update(company: CompanyContext, id: number, input: UpdateExtractionMethodInput) {
     const method = await this.methods.update(company.companyGuid, id, input);
     if (!method) throw new NotFoundException('Método de extracción no encontrado.');
     return this.withoutSecrets(method);
   }
 
-  async delete(company: CompanyContext, id: string): Promise<{ deleted: true }> {
+  async delete(company: CompanyContext, id: number): Promise<{ deleted: true }> {
     const deleted = await this.methods.delete(company.companyGuid, id);
     if (!deleted) throw new NotFoundException('Método de extracción no encontrado.');
     return { deleted: true };
   }
 
   private withoutSecrets(method: ExtractionMethodRecord) {
-    const { hasCredentials, ...record } = method;
-    return { ...record, hasCredentials: Boolean(hasCredentials) };
+    const parameters = method.parameters.map((parameter) => {
+      if (!parameter.isSecret) return parameter;
+      const { defaultValue, ...safeParameter } = parameter;
+      return {
+        ...safeParameter,
+        defaultValue: null,
+        hasDefaultValue: defaultValue !== null && defaultValue !== undefined,
+      };
+    });
+    return {
+      ...method,
+      isActive: Boolean(method.isActive),
+      parameters,
+    };
   }
 }

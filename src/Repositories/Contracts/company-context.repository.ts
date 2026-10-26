@@ -6,6 +6,7 @@ export interface CompanyContextResolution {
 }
 
 export interface CompanyContextRepository {
+  findActiveCompanyGuidByCode(companyCode: string): Promise<string | null>;
   validateUserAccess(
     companyGuid: string,
     userGuid: string,

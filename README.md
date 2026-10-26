@@ -2,7 +2,7 @@
 
 > **Proyecto:** KindMetrics
 > **Componente:** API local del Collector (también denominada informalmente `KindMetricsCte-API`)
-> **Estado auditado:** 24-10-2026. NestJS con Fastify; implementados login, health, CRUD de Companies, creación explícita de schema por Company, CRUD de Extraction Methods con CompanyContext y `POST /api/v1/queries/execute` (501 intencionalmente). El aprovisionamiento completo de schemas Company y la autorización CUSTOMER por identidad de instalación siguen pendientes.
+> **Estado auditado:** 26-10-2026. NestJS con Fastify; implementados login, health, CRUD de Companies, creación explícita de schema por Company, CRUD agregado de Extraction Methods con CompanyContext y `POST /api/v1/queries/execute` (501 intencionalmente). El aprovisionamiento automatizado de schemas Company y la autorización CUSTOMER por identidad de instalación siguen pendientes.
 > **Fuente:** decisiones globales en `docs/`; el estado de implementación se contrasta con el código de este repositorio.
 
 ## 1. Objetivo
@@ -345,7 +345,28 @@ Archivos por entorno existentes:
 
 La Company no se determina mediante un valor enviado sin validar por el frontend; en instalaciones locales se resuelve según la asociación confiable de la instancia.
 
-## 13. Logging y observabilidad
+## 13. Catálogo administrativo de extracción
+
+El catálogo administrativo de proveedores y conectores reside en `kindmetricscte`; usa `LocalStoredProcedureRepository`, el mismo `LocalConnectionManager` compartido con consultas y otros procedimientos. `DatabaseModule` continúa siendo el único owner de los pools. Las rutas actuales de métodos y sus asociaciones operativas permanecen en la base física de cada Company para conservar el contrato actual de Collector-UI. No hay claves foráneas entre schemas; `protocol` continúa siendo el contrato de familia del método hasta aprobarse un identificador estable que relacione un método con `connector_key`.
+
+Rutas nuevas, prefijo global `/api/v1`, protegidas con `PlatformAdminGuard`:
+
+| Método | Ruta | Comportamiento |
+| --- | --- | --- |
+| GET/POST | `/extraction-providers` | Listar con filtros/paginación y crear proveedor |
+| GET/PATCH/DELETE | `/extraction-providers/:id` | Consultar, editar y archivar proveedor |
+| GET/POST | `/extraction-connectors` | Listar con filtros/paginación y crear conector |
+| GET/PATCH/DELETE | `/extraction-connectors/:id` | Consultar, editar y archivar conector |
+
+El DELETE es un archivado lógico (`is_active=false`), no una eliminación física. No se permite archivar un proveedor con conectores activos. Crear o editar un conector crea un snapshot de versión; los snapshots no se actualizan. Los conectores iniciales de seed tienen `driverKey=null` y `executionAvailable=false`: son metadatos, no implementaciones ejecutables. Ningún valor de base de datos instala o invoca código.
+
+Las rutas existentes `GET/POST/PATCH/DELETE /api/v1/extraction-methods` siguen siendo Company-scoped y requieren JWT más `X-Company-Id`. Sus tablas `extraction_methods`, parámetros, requests, fields, asociaciones `equipment_extraction_methods` e historial viven en cada Company. `X-Company-Id` ahora también está permitido por CORS; el nombre de schema se deriva de `kindmetricscte.company.database_name`, nunca del request.
+
+La migración local aditiva y el seed están en `Database/migrations/local/2026-10-26_extraction_catalog.sql` y `Database/seeds/local/2026-10-26_extraction_catalog_seed.sql`. Revisar `Database/migrations/README.md` y el estado real en `information_schema` antes de aplicación manual. No se ejecutan durante el arranque ni se aplicaron en esta implementación.
+
+**Alcance pendiente:** todavía no hay drivers de extracción registrados en el Collector. Tampoco se implementan endpoints de gestión de tipos de autenticación/parámetros del conector, duplicación/versionado consultable del método, endpoints individuales de subrecursos ni administración de conexiones genéricas fuera de la asociación existente equipo-método. El esquema del catálogo reserva tablas para auth types y parámetros; falta su CRUD transaccional. Teams/Outlook se modelan mediante Microsoft Graph, pero no se declaran métodos funcionales ni se simulan permisos/licencias. Las respuestas de listados aún no incluyen conteo total de paginación.
+
+## 14. Logging y observabilidad
 
 Distinguir:
 
@@ -354,7 +375,7 @@ Distinguir:
 
 No registrar contraseñas, tokens completos, secretos ni cadenas de conexión completas. Correlacionar operaciones mediante identificadores de solicitud cuando sea posible.
 
-## 14. NestJS y adaptador HTTP
+## 15. NestJS y adaptador HTTP
 
 NestJS y TypeScript son decisiones del proyecto. Conservar módulos NestJS para composición e inyección de dependencias.
 
@@ -362,7 +383,7 @@ El adaptador activo es `@nestjs/platform-fastify`; `main.ts` registra Swagger en
 
 Axios no se utiliza para conectarse a MySQL. Integraciones HTTP externas futuras deben implementarse mediante clientes específicos y justificados.
 
-## 15. Relación con Collector-BS
+## 16. Relación con Collector-BS
 
 ```text
 KindMetrics-Cli-Collector-API
@@ -393,7 +414,7 @@ La API es autoridad de configuración y administración; **no** incorpora el sch
 
 El almacenamiento local temporal es opcional según la configuración aprobada; no debe imponerse como destino permanente ni como paso obligatorio de todas las ejecuciones.
 
-## 16. Endpoints y compatibilidad
+## 17. Endpoints y compatibilidad
 
 Rutas comprobadas en el código:
 
@@ -418,7 +439,9 @@ mysql -u root -p kindmetricscte < Database/02_users_auth_procedures.sql
 
 `Database/01_schema.sql` es para una instalación nueva. Para una existente, aplicar en orden `Database/03_company_short_name_and_crud.sql` y `Database/04_company_database.sql`. La migración `1.2.0` ya está aplicada en el entorno de desarrollo; QA y producción requieren su propia aplicación controlada.
 
-`Database/05_extraction_methods.sql` es una migración manual dirigida a la base Company indicada en el archivo (`km_company_1ab38c98cf5f11f1b541a6d1e9ab77e1`). No se ejecuta durante las peticiones ni el arranque. `sp_companies_create_database` solo crea el schema vacío: todavía no existe un aprovisionador que instale tablas, índices y procedimientos y valide la versión antes de activar Company. Aplicar migraciones con una cuenta administrativa controlada; no ejecutarlas automáticamente contra datos reales.
+`Database/05_extraction_methods.sql` instala las tablas `extraction_methods`, `extraction_method_parameters`, `extraction_method_requests`, `extraction_method_fields`, `equipment_extraction_methods` y `extraction_method_versions`, junto con sus Stored Procedures CRUD, en `km_company_1ab38c98cf5f11f1b541a6d1e9ab77e1`. La versión `company-1.1.0` queda registrada en `schema_migrations`. El script se aplica explícitamente con `node Database/_apply_extraction_methods_once.js`; no se ejecuta durante peticiones ni al arrancar. El aplicador comprueba los objetos y la versión al finalizar. `sp_companies_create_database` solo crea un schema vacío: todavía no existe un aprovisionador general que instale y valide migraciones antes de activar cualquier Company. Aplicar migraciones con una cuenta administrativa controlada; no ejecutarlas automáticamente contra datos reales.
+
+El CRUD HTTP de Extraction Methods maneja el agregado completo: método, parámetros, requests, fields anidados, asociaciones a equipment y snapshots de versión. `POST` crea la versión inicial; `PATCH` crea una versión nueva en la misma transacción que los cambios. `DELETE` elimina relaciones dependientes mediante `ON DELETE CASCADE`. Los parámetros marcados `isSecret` nunca devuelven su `defaultValue` ni en la lectura ni en los snapshots.
 
 Configurar `JWT_SECRET` como valor aleatorio de 32 bytes o más en el archivo de entorno activo. Para generar uno localmente con Node:
 

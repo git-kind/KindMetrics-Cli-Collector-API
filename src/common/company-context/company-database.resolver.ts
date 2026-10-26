@@ -1,4 +1,8 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   COMPANY_CONTEXT_REPOSITORY,
   CompanyContextRepository,
@@ -13,8 +17,18 @@ export class CompanyDatabaseResolver {
     private readonly companies: CompanyContextRepository,
   ) {}
 
-  async resolve(companyGuid: string, userGuid: string): Promise<CompanyContext> {
-    const hasAccess = await this.companies.validateUserAccess(companyGuid, userGuid);
+  async resolve(
+    companyCode: string,
+    userGuid: string,
+    isPlatformAdmin: boolean,
+  ): Promise<CompanyContext> {
+    const companyGuid = await this.companies.findActiveCompanyGuidByCode(companyCode);
+    if (!companyGuid) {
+      throw new NotFoundException('Company no encontrada o inactiva.');
+    }
+
+    const hasAccess = isPlatformAdmin ||
+      await this.companies.validateUserAccess(companyGuid, userGuid);
     if (!hasAccess) {
       throw new ForbiddenException('El usuario no tiene acceso a esta Company.');
     }

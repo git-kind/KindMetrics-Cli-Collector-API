@@ -5,7 +5,7 @@ import {
   Delete,
   Get,
   Param,
-  ParseUUIDPipe,
+  ParseIntPipe,
   Patch,
   Post,
   UseGuards,
@@ -40,9 +40,9 @@ import { CompanyContext } from '../../common/company-context/company-context';
 @ApiTags('Extraction Methods')
 @ApiBearerAuth()
 @ApiHeader({
-  name: 'X-Company-Id',
+  name: 'X-Company-Code',
   required: true,
-  description: 'GUID de la Company; el backend resuelve su base de datos.',
+  description: 'Código de la Company activa; el backend resuelve su GUID y base de datos.',
 })
 @ApiExtraModels(ApiResponseDto, ApiResponseMetaDto, ApiErrorDto, ExtractionMethodResponseDto)
 @UseGuards(JwtAuthGuard, CompanyContextGuard)
@@ -62,7 +62,7 @@ export class ExtractionMethodController {
   @ApiResponse({ status: 200, type: ApiResponseDto })
   get(
     @CurrentCompany() company: CompanyContext,
-    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('id', ParseIntPipe) id: number,
   ) {
     return this.methods.get(company, id);
   }
@@ -88,7 +88,7 @@ export class ExtractionMethodController {
   @ApiResponse({ status: 200, type: ApiResponseDto })
   async update(
     @CurrentCompany() company: CompanyContext,
-    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('id', ParseIntPipe) id: number,
     @Body() body: unknown,
   ) {
     const parsed = UpdateExtractionMethodSchema.safeParse(body);
@@ -103,7 +103,7 @@ export class ExtractionMethodController {
   @ApiResponse({ status: 200, type: ApiResponseDto })
   delete(
     @CurrentCompany() company: CompanyContext,
-    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('id', ParseIntPipe) id: number,
   ) {
     return this.methods.delete(company, id);
   }

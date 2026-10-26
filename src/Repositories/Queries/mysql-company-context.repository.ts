@@ -13,6 +13,14 @@ interface CompanyRow {
 export class MySqlCompanyContextRepository implements CompanyContextRepository {
   constructor(private readonly queries: LocalQueryRepository) {}
 
+  async findActiveCompanyGuidByCode(companyCode: string): Promise<string | null> {
+    const companies = await this.queries.execute<Array<{ guid: string }>>(
+      'SELECT `guid` FROM `company` WHERE `code` = ? AND `status` = ? LIMIT 1',
+      [companyCode, 'ACTIVE'],
+    );
+    return companies[0]?.guid ?? null;
+  }
+
   async validateUserAccess(
     companyGuid: string,
     userGuid: string,

@@ -5,6 +5,6 @@ export interface CompanyContext {
 
 export interface CompanyContextRequest {
   headers: Record<string, string | string[] | undefined>;
-  user?: { sub?: string };
+  user?: { sub?: string; isPlatformAdmin?: boolean };
   companyContext?: CompanyContext;
 }
