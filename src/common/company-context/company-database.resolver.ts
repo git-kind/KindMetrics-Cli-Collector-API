@@ -33,6 +33,9 @@ export class CompanyDatabaseResolver {
       throw new ForbiddenException('El usuario no tiene acceso a esta Company.');
     }
 
-    return { companyGuid, userGuid };
+    const roles = isPlatformAdmin
+      ? ['ADMIN']
+      : await this.companies.findUserRoleCodes(companyGuid, userGuid);
+    return { companyGuid, userGuid, roles };
   }
 }

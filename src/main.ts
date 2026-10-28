@@ -22,12 +22,13 @@ async function bootstrap(): Promise<void> {
   app.useLogger(logger);
   app.enableCors({
     origin: corsOrigins,
-    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: [
       'Accept',
       'Authorization',
       'Content-Type',
       'X-Company-Code',
+      'x-company-code',
     ],
     credentials: false,
     optionsSuccessStatus: 204,

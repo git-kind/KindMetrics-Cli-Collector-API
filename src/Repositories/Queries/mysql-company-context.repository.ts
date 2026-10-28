@@ -32,6 +32,14 @@ export class MySqlCompanyContextRepository implements CompanyContextRepository {
     return memberships.length > 0;
   }
 
+  async findUserRoleCodes(companyGuid: string, userGuid: string): Promise<string[]> {
+    const roles = await this.queries.execute<Array<{ code: string }>>(
+      'SELECT r.`code` FROM `users` u INNER JOIN `user_roles` ur ON ur.`user_id` = u.`id` INNER JOIN `roles` r ON r.`id` = ur.`role_id` INNER JOIN `company` c ON c.`id` = r.`company_id` WHERE u.`guid` = ? AND u.`status` = ? AND c.`guid` = ? AND c.`status` = ?',
+      [userGuid, 'ACTIVE', companyGuid, 'ACTIVE'],
+    );
+    return roles.map((role) => role.code.toUpperCase());
+  }
+
   async findActiveCompanyDatabaseName(companyGuid: string): Promise<string | null> {
     const companies = await this.queries.execute<CompanyRow[]>(
       'SELECT `guid`, `database_name` AS `databaseName` FROM `company` WHERE `guid` = ? AND `status` = ? LIMIT 1',

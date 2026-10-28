@@ -11,5 +11,6 @@ export interface CompanyContextRepository {
     companyGuid: string,
     userGuid: string,
   ): Promise<boolean>;
+  findUserRoleCodes(companyGuid: string, userGuid: string): Promise<string[]>;
   findActiveCompanyDatabaseName(companyGuid: string): Promise<string | null>;
 }

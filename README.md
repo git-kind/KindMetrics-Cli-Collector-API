@@ -201,6 +201,47 @@ src/
 
 No se crean carpetas vacías para módulos todavía no desarrollados.
 
+### Servicios Company-scoped
+
+`ServicesModule` administra conexiones reutilizables dentro del CompanyContext. Se añadió en paralelo al CRUD de Extraction Methods: las tablas y rutas anteriores permanecen intactas para compatibilidad; no se ejecutó una migración de datos entre ambos modelos.
+
+En `km_company_1ab38c98cf5f11f1b541a6d1e9ab77e1` están aplicadas las tablas `service_types`, `service_drivers`, `service_type_drivers`, `service_auth_types`, `service_driver_auth_types`, `services`, `service_connections`, `service_credentials` y `service_versions`, junto con 18 Stored Procedures `sp_service_*`. El repository usa `CompanyDatabaseRepository` y su pool existente. Migraciones y runner están documentados en `Database/migrations/README.md`.
+
+Rutas bajo `/api/v1`, protegidas por JWT, `X-Company-Code` y CompanyContext:
+
+| Ruta | Acceso |
+| --- | --- |
+| `GET/POST /services` y `GET/PATCH/DELETE /services/:id` | ADMIN muta; VIEWER lee |
+| `POST /services/:id/duplicate`, `PATCH /services/:id/status` | ADMIN |
+| `POST /services/:id/test-connection`, `GET /services/:id/usage` | ADMIN prueba; ADMIN/VIEWER consulta uso |
+| `GET/PATCH /services/:id/connection` | ADMIN actualiza; VIEWER lee |
+| `GET/POST /services/:id/credentials`, `DELETE /service-credentials/:credentialId` | ADMIN muta; VIEWER lee referencias |
+| `GET /services/:id/versions[/:version]` | ADMIN / VIEWER |
+| `GET /service-types`, `/service-drivers`, `/service-auth-types` | ADMIN / VIEWER |
+
+Los roles `ADMIN`/`VIEWER` se leen de `roles` y `user_roles` del CompanyContext existente; el platform admin autenticado conserva acceso administrativo. Los drivers semilla (`http`, `snmp`, `webhook`, `microsoft-graph`, `webex`, `zoom`) están `NOT_IMPLEMENTED`; la prueba de conexión devuelve `NOT_SUPPORTED` y no simula conectividad.
+
+`authConfig` no se expone ni se copia en snapshots. Los objetos JSON rechazan nombres de campos que parezcan secretos; las referencias se limitan a `vault://` y `secret://`. No hay gestor vault integrado, por lo que guardar una referencia no resuelve ni valida la credencial. No se creó FK hacia Collectors porque ese agregado no existe en el schema Company inspeccionado.
+
+### Collectors Company-scoped
+
+`CollectorsModule` administra Collectors en el CompanyContext, utilizando `CompanyDatabaseRepository`, el pool Company compartido y Stored Procedures. La migración `company-2026.10.26-collectors` y las actualizaciones de dependencia/runtime están documentadas en `Database/migrations/README.md` y aplicadas al schema de desarrollo `km_company_1ab38c98cf5f11f1b541a6d1e9ab77e1`.
+
+`collectors.service_id` es obligatorio (`BIGINT UNSIGNED`), indexado y tiene `fk_collectors_service` hacia `services.id` con `ON DELETE RESTRICT`. La configuración de un Collector incluye targets, métodos y versiones de Extraction Methods, programación, transformaciones permitidas, mapeos, destinos, políticas, checkpoints, versiones e historial de ejecución. Las referencias a métodos y versiones usan FKs porque ambos agregados están en el mismo schema Company. `equipment_id` en targets permanece opcional y sin FK porque no hay tabla Equipment en este schema.
+
+Rutas `/api/v1` protegidas por JWT, `X-Company-Code`, CompanyContext y roles:
+
+| Ruta | Acceso |
+| --- | --- |
+| `GET/POST /collectors`, `GET/PATCH/DELETE /collectors/:id` | ADMIN muta; VIEWER lee |
+| `POST /collectors/:id/duplicate`, `PATCH /collectors/:id/status` | ADMIN |
+| `GET/PUT /collectors/:id/configuration`, `POST /collectors/:id/validate` | ADMIN configura/valida; VIEWER consulta |
+| `GET /collectors?serviceId=...`, `GET /services/:serviceId/collectors` | ADMIN / VIEWER |
+| `POST /collectors/:id/run` | ADMIN; crea ejecución `QUEUED`, no ejecuta adquisición |
+| `GET /collectors/:id/executions[/:executionId]`, `GET /collectors/:id/health`, `GET /collectors/:id/versions[/:version]` | ADMIN / VIEWER |
+
+Las transformaciones se validan por enum; no se ejecuta JavaScript arbitrario. Se validan cron de cinco campos y zonas IANA. Los JSON de configuración rechazan claves que parezcan secretos y los snapshots no incluyen credenciales. `Collector-BS` es responsable de reclamar jobs con lease (`sp_collector_execution_claim`) y ejecutar; el API solo persiste configuración, solicita trabajos y presenta estado. La prueba HTTP y SQL usa datos temporales que se eliminan al terminar.
+
 ## 6. Módulos de negocio previstos
 
 - **Installation:** configuración inicial de la instancia local.
@@ -245,7 +286,7 @@ La separación de bases es lógica y puede desplegarse en distintas instancias s
 
 ### 7.2.1 CompanyContext y aislamiento
 
-Las rutas de Extraction Methods reciben `X-Company-Id` como GUID lógico y exigen JWT. `JwtAuthGuard` valida el token y adjunta el `sub`; `CompanyContextGuard` consulta el contrato local de resolución y exige que el usuario activo tenga al menos un rol asignado a la Company mediante `users → user_roles → roles.company_id`. El repository de acceso Company recibe ese GUID, busca `company.database_name`, verifica que sea exactamente `km_company_<guid-sin-guiones>`, obtiene/reutiliza el pool y ejecuta el Stored Procedure. Ninguna capa recibe el nombre físico desde HTTP.
+Las rutas Company-scoped de Extraction Methods y Services requieren `X-Company-Code` y JWT. `CompanyContextGuard` resuelve el código a GUID de Company activa y valida el acceso; `CompanyDatabaseRepository` obtiene `company.database_name`, comprueba que corresponda a `km_company_<guid-sin-guiones>`, reutiliza el pool y ejecuta el Stored Procedure. Ninguna capa recibe el nombre físico desde HTTP.
 
 Esta autorización corresponde al esquema existente del Collector API; no implementa el modelo conceptual `UserCompanyAccess` de la plataforma central. Para instalación CUSTOMER, falta leer y validar la Company fija asociada a la instalación. En ese modo, el header deberá compararse con esa asociación y nunca permitir selección. El API no recibe ni soporta actualmente hosts o credenciales distintos para cada Company; se requiere una decisión y migración de configuración antes de habilitarlos.
 
@@ -288,7 +329,7 @@ La autorización avanzada por recurso/acción/alcance, capacidades y permisos po
 
 ## 9. CompanyContext y límites de tenant
 
-Extraction Methods implementa `Authorization: Bearer <JWT>` y `X-Company-Id`, con validación del GUID, usuario activo, existencia de un rol asignado en la misma Company y mapping físico obtenido desde `kindmetricscte.company.database_name`. El CRUD administrativo de Companies sigue protegido por `isPlatformAdmin`. La plataforma central también documenta `X-Company-Guid`; no se cambia el contrato actual del Collector API.
+Extraction Methods y Services implementan `Authorization: Bearer <JWT>` y `X-Company-Code`; el guard resuelve el código a Company activa y valida el acceso. El CRUD administrativo de Companies sigue protegido por `isPlatformAdmin`. No se acepta `X-Company-Id` como selector de contexto de estas rutas.
 
 Para una instalación local asociada a una Company, el comportamiento final previsto es:
 
@@ -360,7 +401,7 @@ Rutas nuevas, prefijo global `/api/v1`, protegidas con `PlatformAdminGuard`:
 
 El DELETE es un archivado lógico (`is_active=false`), no una eliminación física. No se permite archivar un proveedor con conectores activos. Crear o editar un conector crea un snapshot de versión; los snapshots no se actualizan. Los conectores iniciales de seed tienen `driverKey=null` y `executionAvailable=false`: son metadatos, no implementaciones ejecutables. Ningún valor de base de datos instala o invoca código.
 
-Las rutas existentes `GET/POST/PATCH/DELETE /api/v1/extraction-methods` siguen siendo Company-scoped y requieren JWT más `X-Company-Id`. Sus tablas `extraction_methods`, parámetros, requests, fields, asociaciones `equipment_extraction_methods` e historial viven en cada Company. `X-Company-Id` ahora también está permitido por CORS; el nombre de schema se deriva de `kindmetricscte.company.database_name`, nunca del request.
+Las rutas existentes `GET/POST/PATCH/DELETE /api/v1/extraction-methods` siguen siendo Company-scoped y requieren JWT más `X-Company-Code`. Sus tablas `extraction_methods`, parámetros, requests, fields, asociaciones `equipment_extraction_methods` e historial viven en cada Company. El nombre de schema se resuelve desde `kindmetricscte.company.database_name`, nunca desde el request.
 
 La migración local aditiva y el seed están en `Database/migrations/local/2026-10-26_extraction_catalog.sql` y `Database/seeds/local/2026-10-26_extraction_catalog_seed.sql`. Revisar `Database/migrations/README.md` y el estado real en `information_schema` antes de aplicación manual. No se ejecutan durante el arranque ni se aplicaron en esta implementación.
 
@@ -423,7 +464,7 @@ Rutas comprobadas en el código:
 - `POST /api/v1/queries/execute`: valida `query`, `datasourceGuid` y parámetros con Zod y devuelve 501 intencionalmente; no ejecuta SQL.
 - `GET/POST /api/v1/companies`, `GET/PATCH/DELETE /api/v1/companies/:guid`: CRUD protegido por JWT con `isPlatformAdmin=true`; campos `name`, `shortName`, `code`, `timezone`, `locale`, `status` y `configJson`.
 - `POST /api/v1/companies/:guid/database`: crea el schema vacío derivado del GUID y guarda `databaseName`; no acepta el nombre de base en el request ni elimina schemas.
-- `GET/POST /api/v1/extraction-methods`, `GET/PATCH/DELETE /api/v1/extraction-methods/:id`: CRUD por Company con `X-Company-Id`, JWT y CompanyContext. Las lecturas no devuelven credenciales; `hasCredentials` informa si existen.
+- `GET/POST /api/v1/extraction-methods`, `GET/PATCH/DELETE /api/v1/extraction-methods/:id`: CRUD por Company con `X-Company-Code`, JWT y CompanyContext. Las lecturas no devuelven credenciales; `hasCredentials` informa si existen.
 - `GET /docs` y `GET /docs/json`: Swagger UI y documento OpenAPI.
 
 El login no crea usuarios. Los procedimientos de `Database/02_users_auth_procedures.sql` permiten CRUD a nivel de base de datos; no deben exponerse directamente hasta definir autorización de administración.

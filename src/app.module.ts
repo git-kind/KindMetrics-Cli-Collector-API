@@ -12,6 +12,8 @@ import { QueriesModule } from './modules/queries/queries.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CompaniesModule } from './modules/companies/companies.module';
 import { ExtractionMethodsModule } from './modules/extraction-methods/extraction-methods.module';
+import { ServicesModule } from './modules/services/services.module';
+import { CollectorsModule } from './modules/collectors/collectors.module';
 
 @Module({
   imports: [
@@ -37,6 +39,8 @@ import { ExtractionMethodsModule } from './modules/extraction-methods/extraction
     AuthModule,
     CompaniesModule,
     ExtractionMethodsModule,
+    ServicesModule,
+    CollectorsModule,
   ],
   providers: [AppLogger],
 })
